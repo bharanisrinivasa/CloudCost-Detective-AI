@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}Register - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card glass-card animated-fadeIn">
+                <div class="card-body p-5">
+                    <div class="text-center mb-4">
+                        <i class="fa-solid fa-user-plus text-info fs-1 mb-2"></i>
+                        <h2 class="fw-bold">Create Account</h2>
+                        <p class="text-secondary text-sm">Register for CloudCost Detective AI platform</p>
+                    </div>
+
+                    <form method="POST" enctype="multipart/form-data" novalidate>
+                        {% csrf_token %}
+
+                        <!-- Global non-field errors if any -->
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger shadow-sm border-0 animated-fadeIn" role="alert">
+                                {% for error in form.non_field_errors %}
+                                    <div class="d-flex align-items-center">
+                                        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+                                        <span>{{ error }}</span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        {% for field in form %}
+                            <div class="mb-4">
+                                <label for="{{ field.id_for_label }}" class="form-label d-flex align-items-center">
+                                    {% if field.name == 'username' %}
+                                        <i class="fa-regular fa-user me-2 text-secondary"></i>
+                                    {% elif field.name == 'email' %}
+                                        <i class="fa-regular fa-envelope me-2 text-secondary"></i>
+                                    {% elif field.name == 'organization' %}
+                                        <i class="fa-solid fa-building me-2 text-secondary"></i>
+                                    {% elif field.name == 'phone_number' %}
+                                        <i class="fa-solid fa-phone me-2 text-secondary"></i>
+                                    {% elif field.name == 'profile_picture' %}
+                                        <i class="fa-regular fa-image me-2 text-secondary"></i>
+                                    {% elif 'password' in field.name %}
+                                        <i class="fa-solid fa-lock me-2 text-secondary"></i>
+                                    {% endif %}
+                                    {{ field.label }}
+                                </label>
+                                
+                                {{ field }}
+                                
+                                {% if field.help_text %}
+                                    <div class="form-text text-secondary">{{ field.help_text|safe }}</div>
+                                {% endif %}
+                                
+                                {% if field.errors %}
+                                    {% for error in field.errors %}
+                                        <div class="invalid-feedback d-block">{{ error }}</div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+
+                        <div class="d-grid mt-4">
+                            <button type="submit" class="btn btn-primary-glow btn-lg">
+                                <i class="fa-solid fa-user-plus me-2"></i>Sign Up
+                            </button>
+                        </div>
+                    </form>
+
+                    <hr class="my-4 border-secondary opacity-25">
+
+                    <div class="text-center">
+                        <p class="text-secondary mb-0">Already have an account? 
+                            <a href="{% url 'login' %}" class="text-info fw-semibold text-decoration-none">Login here</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

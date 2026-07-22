@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+
+{% block title %}My Profile - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row">
+        <!-- Profile summary card -->
+        <div class="col-lg-4 mb-4 mb-lg-0">
+            <div class="card glass-card animated-fadeIn text-center p-4">
+                <div class="card-body">
+                    <!-- Profile Picture container -->
+                    <div class="profile-pic-container">
+                        {% if user.profile_picture %}
+                            <img src="{{ user.profile_picture.url }}" alt="{{ user.username }}'s profile picture" class="profile-pic-img">
+                        {% else %}
+                            <div class="profile-pic-placeholder">
+                                <i class="fa-solid fa-user-astronaut"></i>
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <h3 class="fw-bold mb-1">{{ user.username }}</h3>
+                    <p class="text-info fw-medium mb-3">
+                        {% if user.organization %}
+                            <i class="fa-solid fa-building me-1"></i>{{ user.organization }}
+                        {% else %}
+                            Individual Account
+                        {% endif %}
+                    </p>
+                    
+                    <hr class="border-secondary opacity-25">
+                    
+                    <div class="text-start">
+                        <div class="mb-2">
+                            <span class="text-secondary text-sm d-block">Email Address</span>
+                            <span class="fw-medium">{{ user.email|default:"None set" }}</span>
+                        </div>
+                        <div class="mb-2">
+                            <span class="text-secondary text-sm d-block">Phone Number</span>
+                            <span class="fw-medium">{{ user.phone_number|default:"None set" }}</span>
+                        </div>
+                        <div class="mb-2">
+                            <span class="text-secondary text-sm d-block">Member Since</span>
+                            <span class="fw-medium">{{ user.date_joined|date:"F d, Y" }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile edit form -->
+        <div class="col-lg-8">
+            <div class="card glass-card animated-fadeIn p-4">
+                <div class="card-body">
+                    <h2 class="fw-bold mb-4"><i class="fa-solid fa-user-gear me-2 text-info"></i>Edit Profile Details</h2>
+                    
+                    <form method="POST" enctype="multipart/form-data" novalidate>
+                        {% csrf_token %}
+
+                        <!-- Global non-field errors -->
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger shadow-sm border-0 animated-fadeIn" role="alert">
+                                {% for error in form.non_field_errors %}
+                                    <div class="d-flex align-items-center">
+                                        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+                                        <span>{{ error }}</span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <label for="{{ form.first_name.id_for_label }}" class="form-label">First Name</label>
+                                {{ form.first_name }}
+                                {% if form.first_name.errors %}
+                                    {% for error in form.first_name.errors %}
+                                        <div class="invalid-feedback d-block">{{ error }}</div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                            
+                            <div class="col-md-6 mb-4">
+                                <label for="{{ form.last_name.id_for_label }}" class="form-label">Last Name</label>
+                                {{ form.last_name }}
+                                {% if form.last_name.errors %}
+                                    {% for error in form.last_name.errors %}
+                                        <div class="invalid-feedback d-block">{{ error }}</div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="{{ form.email.id_for_label }}" class="form-label">Email Address</label>
+                            {{ form.email }}
+                            {% if form.email.help_text %}
+                                <div class="form-text text-secondary">{{ form.email.help_text|safe }}</div>
+                            {% endif %}
+                            {% if form.email.errors %}
+                                {% for error in form.email.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="{{ form.organization.id_for_label }}" class="form-label">Organization</label>
+                            {{ form.organization }}
+                            {% if form.organization.help_text %}
+                                <div class="form-text text-secondary">{{ form.organization.help_text|safe }}</div>
+                            {% endif %}
+                            {% if form.organization.errors %}
+                                {% for error in form.organization.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="{{ form.phone_number.id_for_label }}" class="form-label">Phone Number</label>
+                            {{ form.phone_number }}
+                            {% if form.phone_number.help_text %}
+                                <div class="form-text text-secondary">{{ form.phone_number.help_text|safe }}</div>
+                            {% endif %}
+                            {% if form.phone_number.errors %}
+                                {% for error in form.phone_number.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="{{ form.profile_picture.id_for_label }}" class="form-label">Profile Picture</label>
+                            {{ form.profile_picture }}
+                            {% if form.profile_picture.help_text %}
+                                <div class="form-text text-secondary">{{ form.profile_picture.help_text|safe }}</div>
+                            {% endif %}
+                            {% if form.profile_picture.errors %}
+                                {% for error in form.profile_picture.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-3 mt-4">
+                            <a href="{% url 'dashboard-home' %}" class="btn btn-secondary-custom">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary-glow">
+                                <i class="fa-solid fa-floppy-disk me-2"></i>Save Changes
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

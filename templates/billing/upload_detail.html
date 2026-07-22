@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Details - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card glass-card animated-fadeIn p-4">
+                <div class="card-body">
+                    <!-- Title Section -->
+                    <div class="mb-4 pb-3 border-bottom border-secondary border-opacity-25 d-flex justify-content-between align-items-center">
+                        <div>
+                            <h2 class="fw-bold"><i class="fa-solid fa-file-invoice text-info me-2"></i>Report Details</h2>
+                            <p class="text-secondary mb-0">Detailed metadata and storage attributes for the uploaded file.</p>
+                        </div>
+                        <a href="{% url 'upload-history' %}" class="btn btn-secondary-custom btn-sm">
+                            <i class="fa-solid fa-arrow-left me-1"></i>Back to History
+                        </a>
+                    </div>
+
+                    <!-- Details Table -->
+                    <table class="table table-borderless text-secondary m-0">
+                        <tbody>
+                            <!-- Original Filename -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white" style="width: 30%;">Original Filename</td>
+                                <td class="py-3 text-info fw-medium">{{ upload.original_filename }}</td>
+                            </tr>
+                            
+                            <!-- Stored Filename / Path -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Stored File Path</td>
+                                <td class="py-3 text-sm text-break font-monospace">{{ upload.stored_file.name }}</td>
+                            </tr>
+                            
+                            <!-- Upload Type -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Upload Type</td>
+                                <td class="py-3">
+                                    {% if upload.upload_type == 'Billing Report' %}
+                                        <span class="badge bg-purple bg-opacity-10 text-purple border border-purple border-opacity-25 px-2 py-1" style="color: #c084fc !important;">
+                                            Billing Report
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-teal bg-opacity-10 text-teal border border-teal border-opacity-25 px-2 py-1" style="color: #2dd4bf !important;">
+                                            Usage Report
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            
+                            <!-- Uploaded By -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Uploaded By</td>
+                                <td class="py-3">
+                                    <i class="fa-regular fa-user me-1 text-sm"></i>{{ upload.uploaded_by.username|default:"System" }}
+                                    {% if upload.uploaded_by.organization %}
+                                        <span class="text-secondary text-sm">({{ upload.uploaded_by.organization }})</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            
+                            <!-- Uploaded Time -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Upload Time</td>
+                                <td class="py-3">{{ upload.uploaded_at|date:"F d, Y - H:i:s" }} UTC</td>
+                            </tr>
+                            
+                            <!-- Status -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Processing Status</td>
+                                <td class="py-3">
+                                    {% if upload.upload_status == 'Uploaded' %}
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-2.5 py-1.5">
+                                            Uploaded
+                                        </span>
+                                    {% elif upload.upload_status == 'Processing' %}
+                                        <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 px-2.5 py-1.5 animate-pulse">
+                                            <i class="fa-solid fa-spinner fa-spin me-1.5"></i>Processing
+                                        </span>
+                                    {% elif upload.upload_status == 'Completed' %}
+                                        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2.5 py-1.5">
+                                            <i class="fa-solid fa-circle-check me-1.5"></i>Completed
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-2.5 py-1.5">
+                                            <i class="fa-solid fa-circle-xmark me-1.5"></i>Failed
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            
+                            <!-- File Size -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">File Size</td>
+                                <td class="py-3">{{ upload.file_size|filesizeformat }} <span class="text-secondary text-xs">({{ upload.file_size }} bytes)</span></td>
+                            </tr>
+                            
+                            <!-- Rows Read -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Rows Read / Imported</td>
+                                <td class="py-3">
+                                    <span class="text-white">{{ upload.rows_read }}</span> read / 
+                                    <span class="text-info fw-semibold">{{ upload.rows_imported }}</span> imported / 
+                                    <span class="text-warning fw-semibold">{{ upload.rows_skipped }}</span> skipped
+                                </td>
+                            </tr>
+
+                            <!-- Processing Time -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Processing Time</td>
+                                <td class="py-3">{{ upload.processing_time }} seconds</td>
+                            </tr>
+
+                            <!-- Remarks -->
+                            <tr class="border-bottom border-secondary border-opacity-10">
+                                <td class="py-3 fw-semibold text-white">Remarks</td>
+                                <td class="py-3 text-white-50">{{ upload.remarks|default:"No remarks provided."|linebreaksbr }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Error Message if any -->
+                    {% if upload.error_message %}
+                        <div class="alert alert-danger bg-danger bg-opacity-10 border border-danger border-opacity-20 rounded-4 text-start mt-4 shadow-sm" role="alert">
+                            <h6 class="fw-semibold text-white mb-1"><i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>Error Traceback</h6>
+                            <p class="text-secondary text-sm mb-0 font-monospace">{{ upload.error_message }}</p>
+                        </div>
+                    {% endif %}
+
+                    <!-- Processing Logs -->
+                    {% if upload.processing_logs %}
+                        <div class="mt-4">
+                            <h5 class="fw-bold text-white mb-2"><i class="fa-solid fa-terminal text-info me-2 text-sm"></i>Import Logs</h5>
+                            <pre class="bg-black bg-opacity-40 text-secondary border border-secondary border-opacity-15 p-3 rounded-4 text-xs overflow-auto font-monospace mb-0" style="max-height: 250px;">{{ upload.processing_logs }}</pre>
+                        </div>
+                    {% endif %}
+
+                    <!-- Actions -->
+                    <div class="d-flex justify-content-end gap-3 mt-5 pt-3 border-top border-secondary border-opacity-25">
+                        <a href="{% url 'upload-history' %}" class="btn btn-secondary-custom">
+                            Back to History
+                        </a>
+                        {% if upload.uploaded_by == user or user.is_staff %}
+                            <a href="{% url 'upload-delete' upload.pk %}" class="btn btn-danger">
+                                <i class="fa-regular fa-trash-can me-2"></i>Delete Upload
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

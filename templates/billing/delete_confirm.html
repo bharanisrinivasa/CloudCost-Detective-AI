@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+
+{% block title %}Delete Upload - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card glass-card animated-fadeIn p-4 border-danger border-opacity-25">
+                <div class="card-body text-center">
+                    <i class="fa-solid fa-triangle-exclamation text-danger fs-1 mb-3 animate-bounce"></i>
+                    <h2 class="fw-bold text-white mb-2">Delete Report Upload?</h2>
+                    <p class="text-secondary mb-4">
+                        Are you sure you want to permanently delete **{{ upload.original_filename }}**?
+                    </p>
+                    
+                    <div class="alert alert-danger bg-danger bg-opacity-10 border border-danger border-opacity-20 rounded-4 text-start mb-4 shadow-sm" role="alert">
+                        <div class="d-flex">
+                            <i class="fa-solid fa-circle-info text-danger me-2.5 mt-1"></i>
+                            <div>
+                                <h6 class="fw-semibold text-white mb-1">Warning: Permanent Deletion</h6>
+                                <p class="text-secondary text-sm mb-0">This will remove the file database record and permanently delete the physical file from the disk.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Info details -->
+                    <div class="p-3 mb-4 rounded-3 border border-secondary border-opacity-15 text-start text-sm" style="background: rgba(255, 255, 255, 0.01);">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-secondary">Upload Type:</span>
+                            <span class="text-white fw-semibold">{{ upload.upload_type }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-secondary">Uploader:</span>
+                            <span class="text-white fw-semibold">{{ upload.uploaded_by.username }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span class="text-secondary">File Size:</span>
+                            <span class="text-white fw-semibold">{{ upload.file_size|filesizeformat }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Action form -->
+                    <form method="POST">
+                        {% csrf_token %}
+                        <div class="d-flex justify-content-center gap-3">
+                            <a href="{% url 'upload-history' %}" class="btn btn-secondary-custom px-4">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-danger px-4">
+                                <i class="fa-regular fa-trash-can me-2"></i>Yes, Delete
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

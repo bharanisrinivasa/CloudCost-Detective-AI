@@ -1,0 +1,33 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: cloudcost
+      POSTGRES_USER: cloudcost
+      POSTGRES_PASSWORD: cloudcost
+    ports:
+      - "5432:5432"
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: cloudcost
+      DB_USER: cloudcost
+      DB_PASSWORD: cloudcost
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
