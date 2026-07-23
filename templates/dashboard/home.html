@@ -2,122 +2,556 @@
 
 {% block title %}Dashboard - CloudCost Detective AI{% endblock %}
 
+{% block extra_css %}
+<style>
+    /* Premium FinOps Dashboard Styling */
+    .filter-input {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-primary) !important;
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        transition: var(--transition-smooth);
+    }
+    .filter-input:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--accent-color);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    .filter-input option {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    .kpi-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.05) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 1.5rem;
+        transition: var(--transition-smooth);
+    }
+    .kpi-card:hover {
+        transform: translateY(-3px);
+        border-color: rgba(56, 189, 248, 0.3);
+    }
+    .table-custom {
+        background: transparent !important;
+    }
+    .table-custom th {
+        border-bottom: 2px solid rgba(255, 255, 255, 0.1) !important;
+        color: var(--text-secondary) !important;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.5px;
+    }
+    .table-custom td {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+        color: var(--text-primary) !important;
+        vertical-align: middle;
+    }
+    .progress-bar-custom {
+        height: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .progress-fill {
+        height: 100%;
+        background: var(--primary-glow);
+        border-radius: 3px;
+    }
+    .reset-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-secondary);
+        transition: var(--transition-smooth);
+        border-radius: 10px;
+    }
+    .reset-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text-primary);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container py-5">
-    <div class="row justify-content-center">
-        <div class="col-md-10">
-            <div class="card glass-card animated-fadeIn p-5">
+<div class="container py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">Oracle Cloud Cost Optimization</span>
+            <h1 class="fw-bold mt-1 mb-0">Cost Executive Dashboard</h1>
+        </div>
+        <div class="mt-3 mt-md-0 d-flex align-items-center">
+            <div class="me-3 text-end">
+                <span class="text-secondary d-block text-sm">FinOps Platform</span>
+                <span class="fw-bold text-white">Welcome, {{ user.username }}</span>
+            </div>
+            <div class="rounded-circle border border-info overflow-hidden d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; background: rgba(56, 189, 248, 0.1);">
+                <i class="fa-solid fa-user-astronaut text-info fs-4"></i>
+            </div>
+        </div>
+    </div>
+
+    {% if not has_any_data %}
+    <!-- Empty Data State -->
+    <div class="row justify-content-center my-5">
+        <div class="col-md-8 text-center">
+            <div class="card glass-card p-5 shadow-lg">
                 <div class="card-body">
-                    <!-- Top section with header and welcome message -->
-                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-5 pb-4 border-bottom border-secondary border-opacity-25">
-                        <div>
-                            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">Oracle Cloud Cost Optimization</span>
-                            <h1 class="fw-bold mt-1 mb-0">Dashboard</h1>
-                        </div>
-                        <div class="mt-3 mt-md-0 d-flex align-items-center">
-                            <!-- Show profile image avatar or icon -->
-                            <div class="me-3 text-end">
-                                <span class="text-secondary d-block text-sm">Active Session</span>
-                                <span class="fw-bold text-white">Welcome, {{ user.username }}</span>
-                            </div>
-                            <div class="rounded-circle border border-info overflow-hidden" style="width: 50px; height: 50px;">
-                                {% if user.profile_picture %}
-                                    <img src="{{ user.profile_picture.url }}" alt="{{ user.username }}" style="width: 100%; height: 100%; object-fit: cover;">
-                                {% else %}
-                                    <div class="bg-dark d-flex align-items-center justify-content-center w-100 h-100 fs-4 text-secondary">
-                                        <i class="fa-solid fa-user-astronaut text-info"></i>
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
+                    <div class="mb-4">
+                        <i class="fa-solid fa-chart-pie text-secondary opacity-50" style="font-size: 6rem;"></i>
                     </div>
-
-                    <!-- Welcome Box -->
-                    <div class="p-5 rounded-4 bg-gradient shadow-sm border border-secondary border-opacity-10 mb-4" style="background: rgba(99, 102, 241, 0.05);">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <h2 class="fw-bold mb-3 text-info">CloudCost Detective AI</h2>
-                                <p class="text-secondary fs-5 mb-0">
-                                    Welcome, <span class="text-white fw-semibold">{{ user.username }}</span>! Your secure authentication session is fully established. This platform is configured as **CloudCost Detective AI**, an Explainable GenAI-powered Cost Optimization Platform.
-                                </p>
-                            </div>
-                            <div class="col-md-4 text-center d-none d-md-block">
-                                <i class="fa-solid fa-shield-halved text-info" style="font-size: 8rem; opacity: 0.15; filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.4));"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Module 2 Billing Card -->
-                    <div class="row mb-4">
-                        <div class="col-md-12">
-                            <div class="p-4 rounded-4 border border-secondary border-opacity-10 glass-card" style="background: rgba(255, 255, 255, 0.02);">
-                                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center">
-                                    <div class="mb-3 mb-md-0">
-                                        <h4 class="fw-bold mb-1 text-white"><i class="fa-solid fa-file-invoice-dollar text-info me-2"></i>Billing Uploads</h4>
-                                        <p class="text-secondary mb-0">Manage and upload OCI billing and usage reports.</p>
-                                    </div>
-                                    <div class="d-flex align-items-center gap-4">
-                                        <div class="text-md-end">
-                                            <span class="text-secondary text-sm d-block">Total Uploads</span>
-                                            <span class="fs-3 fw-bold text-info">{{ total_uploads|default:0 }}</span>
-                                        </div>
-                                        <a href="{% url 'upload-billing' %}" class="btn btn-primary-glow">
-                                            <i class="fa-solid fa-upload me-2"></i>Upload Billing File
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Project Metadata / Details -->
-                    <div class="row">
-                        <div class="col-md-6 mb-4">
-                            <div class="p-4 rounded-4 border border-secondary border-opacity-10 h-100" style="background: rgba(255, 255, 255, 0.02);">
-                                <h4 class="fw-bold mb-3 text-white"><i class="fa-solid fa-circle-info text-info me-2"></i>Project Details</h4>
-                                <table class="table table-borderless text-secondary m-0">
-                                    <tbody>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Project Name:</td>
-                                            <td class="py-2 text-info">CloudCost Detective AI</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Current Module:</td>
-                                            <td class="py-2">Module 2 - OCI Billing Upload</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Environment:</td>
-                                            <td class="py-2"><span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2.5 py-1.5">Development</span></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="col-md-6 mb-4">
-                            <div class="p-4 rounded-4 border border-secondary border-opacity-10 h-100" style="background: rgba(255, 255, 255, 0.02);">
-                                <h4 class="fw-bold mb-3 text-white"><i class="fa-solid fa-user-lock text-info me-2"></i>Security Info</h4>
-                                <table class="table table-borderless text-secondary m-0">
-                                    <tbody>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Authentication Type:</td>
-                                            <td class="py-2">Session-Based Django Auth</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Organization:</td>
-                                            <td class="py-2">{{ user.organization|default:"None specified" }}</td>
-                                        </tr>
-                                        <tr>
-                                            <td class="ps-0 py-2 fw-semibold text-white">Last Login:</td>
-                                            <td class="py-2">{{ user.last_login|date:"Y-m-d H:i:s" }} UTC</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    <h3 class="fw-bold text-white mb-3">No Billing Data Available</h3>
+                    <p class="text-secondary fs-5 mb-4">
+                        No billing data available. Upload an OCI billing report to begin.
+                    </p>
+                    <a href="{% url 'upload-billing' %}" class="btn btn-primary-glow px-4 py-2.5">
+                        <i class="fa-solid fa-upload me-2"></i>Upload OCI Report
+                    </a>
                 </div>
             </div>
         </div>
     </div>
+    {% else %}
+    <!-- Active Dashboard State -->
+
+    {% if date_warning %}
+    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert" style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
+        <div class="d-flex align-items-center">
+            <i class="fa-solid fa-triangle-exclamation me-2 fs-5"></i>
+            <div>{{ date_warning }}</div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    {% if has_multiple_currencies %}
+    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert" style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
+        <div class="d-flex align-items-center">
+            <i class="fa-solid fa-triangle-exclamation me-2 fs-5"></i>
+            <div>Multiple currencies detected. Combined monetary totals may not represent a directly comparable value.</div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Filters Section -->
+    <div class="card glass-card p-4 mb-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-sliders text-info me-2"></i>Filter Options</h5>
+        <form method="GET" action="{% url 'dashboard-home' %}" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label text-secondary text-sm">Start Date</label>
+                <input type="date" name="start_date" class="form-control filter-input" value="{{ active_filters.start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label text-secondary text-sm">End Date</label>
+                <input type="date" name="end_date" class="form-control filter-input" value="{{ active_filters.end_date }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Service</label>
+                <select name="service" class="form-select filter-input">
+                    <option value="">All Services</option>
+                    {% for svc in available_services %}
+                    <option value="{{ svc }}" {% if active_filters.service == svc %}selected{% endif %}>{{ svc }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Region</label>
+                <select name="region" class="form-select filter-input">
+                    <option value="">All Regions</option>
+                    {% for reg in available_regions %}
+                    <option value="{{ reg }}" {% if active_filters.region == reg %}selected{% endif %}>{{ reg }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary-glow w-100 py-2.5">
+                    <i class="fa-solid fa-filter me-1"></i>Apply
+                </button>
+                <a href="{% url 'dashboard-home' %}" class="btn reset-btn py-2.5 px-3">
+                    <i class="fa-solid fa-rotate-left"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- KPI Cards Section -->
+    <div class="row g-4 mb-4">
+        <!-- Card 1: Total Cost -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Total Cloud Cost</span>
+                    <h2 class="fw-extrabold text-info m-0">
+                        {{ total_cost|floatformat:2 }} <span class="fs-6 text-white fw-normal">{{ currency }}</span>
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-credit-card me-2 text-info"></i>
+                    <span>Aggregated from all active billing uploads</span>
+                </div>
+            </div>
+        </div>
+        <!-- Card 2: Resources Count -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Active Resources Tracked</span>
+                    <h2 class="fw-extrabold text-white m-0">
+                        {{ total_resources }}
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-server me-2 text-info"></i>
+                    <span>Unique resource instances matching filters</span>
+                </div>
+            </div>
+        </div>
+        <!-- Card 3: Total Uploads -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Uploaded Billing Reports</span>
+                    <h2 class="fw-extrabold text-white m-0">
+                        {{ total_uploads }}
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-file-csv me-2 text-info"></i>
+                    <span>Manage uploads in the billing section</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anomalies KPI Section -->
+    <div class="row g-4 mb-4">
+        <!-- Card: Open Anomalies -->
+        <div class="col-md-6">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(245, 158, 11, 0.2);">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-secondary text-sm d-block mb-1">Open Cost Anomalies</span>
+                        <h2 class="fw-extrabold text-warning m-0">
+                            {{ open_anomalies_count }}
+                        </h2>
+                    </div>
+                    <div class="rounded-circle p-2.5" style="background: rgba(245, 158, 11, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+                    </div>
+                </div>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <span class="text-secondary text-xs">Unresolved spending warnings</span>
+                    <a href="{% url 'anomaly-list' %}" class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
+                        <i class="fa-solid fa-eye me-1"></i>View Cost Anomalies
+                    </a>
+                </div>
+            </div>
+        </div>
+        <!-- Card: Critical Anomalies -->
+        <div class="col-md-6">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(239, 68, 68, 0.2);">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-secondary text-sm d-block mb-1">Critical Anomalies</span>
+                        <h2 class="fw-extrabold text-danger m-0">
+                            {{ critical_anomalies_count }}
+                        </h2>
+                    </div>
+                    <div class="rounded-circle p-2.5" style="background: rgba(239, 68, 68, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-radiation text-danger fs-5"></i>
+                    </div>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>
+                    <span>Requires immediate FinOps review</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Trend Section -->
+    <div class="card glass-card p-4 mb-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-line text-info me-2"></i>Monthly Spend Trend</h5>
+        <div style="position: relative; height: 320px; width: 100%;">
+            <canvas id="monthlyTrendChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Doughnut Cost Breakdown & Top Regions Section -->
+    <div class="row g-4 mb-4">
+        <!-- Service Breakdown Chart -->
+        <div class="col-md-6">
+            <div class="card glass-card p-4 h-100">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-pie text-info me-2"></i>Service Cost Breakdown</h5>
+                <div class="d-flex align-items-center justify-content-center" style="position: relative; height: 260px; width: 100%;">
+                    <canvas id="serviceBreakdownChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <!-- Top Regions Table -->
+        <div class="col-md-6">
+            <div class="card glass-card p-4 h-100">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-earth-americas text-info me-2"></i>Top Regions</h5>
+                <div class="table-responsive">
+                    <table class="table table-borderless table-custom m-0">
+                        <thead>
+                            <tr>
+                                <th>Region</th>
+                                <th class="text-end">Cost ({{ currency }})</th>
+                                <th class="text-end">Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in top_regions %}
+                            <tr>
+                                <td><i class="fa-solid fa-location-dot text-info me-2 text-xs"></i>{{ item.region }}</td>
+                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                                <td class="text-end text-secondary">
+                                    <div class="d-flex align-items-center justify-content-end gap-2">
+                                        <span>{{ item.percentage }}%</span>
+                                        <div class="progress-bar-custom d-none d-sm-block" style="width: 60px;">
+                                            <div class="progress-fill" style="width: {{ item.percentage }}%;"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center text-secondary py-4">No regional data matching filters</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top 5 Expensive Resources Section -->
+    <div class="card glass-card p-4 mb-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-receipt text-info me-2"></i>Top 5 Expensive Resources</h5>
+        <div class="table-responsive">
+            <table class="table table-borderless table-custom m-0">
+                <thead>
+                    <tr>
+                        <th>Resource</th>
+                        <th>Resource ID</th>
+                        <th>Service</th>
+                        <th>Region</th>
+                        <th class="text-end">Total Cost ({{ currency }})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in top_resources %}
+                    <tr>
+                        <td class="fw-semibold text-white"><i class="fa-solid fa-cube text-info me-2 text-xs"></i>{{ item.display_name }}</td>
+                        <td><code class="text-secondary text-xs">{{ item.resource_id }}</code></td>
+                        <td><span class="badge bg-secondary bg-opacity-20 text-info border border-secondary border-opacity-35">{{ item.service }}</span></td>
+                        <td>{{ item.region }}</td>
+                        <td class="text-end fw-bold text-white">{{ item.total|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-secondary py-4">No resource billing records matching filters</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Breakdown Details Grid -->
+    <div class="row g-4 mb-4">
+        <!-- Service Full Spending -->
+        <div class="col-md-6">
+            <div class="card glass-card p-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-server text-info me-2"></i>Service Spending Breakdown</h5>
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table class="table table-borderless table-custom m-0">
+                        <thead>
+                            <tr>
+                                <th>Service Name</th>
+                                <th class="text-end">Spent ({{ currency }})</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in service_costs %}
+                            <tr>
+                                <td>{{ item.service }}</td>
+                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="2" class="text-center text-secondary py-3">No service data available</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- Region Full Spending -->
+        <div class="col-md-6">
+            <div class="card glass-card p-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-earth-americas text-info me-2"></i>Region Spending Breakdown</h5>
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table class="table table-borderless table-custom m-0">
+                        <thead>
+                            <tr>
+                                <th>Region</th>
+                                <th class="text-end">Spent ({{ currency }})</th>
+                                <th class="text-end">Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in full_regions %}
+                            <tr>
+                                <td>{{ item.region }}</td>
+                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                                <td class="text-end text-secondary">{{ item.percentage }}%</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center text-secondary py-3">No region data available</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% if has_any_data %}
+<!-- Chart.js Library -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Safely serialize backend lists using standard Django json_script tags -->
+{{ monthly_labels|json_script:"monthly-labels-data" }}
+{{ monthly_data|json_script:"monthly-trend-data" }}
+{{ service_labels|json_script:"service-labels-data" }}
+{{ service_data|json_script:"service-breakdown-data" }}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // Retrieve and parse securely serialized data from JSON nodes
+        const monthlyLabels = JSON.parse(document.getElementById('monthly-labels-data').textContent);
+        const monthlyData = JSON.parse(document.getElementById('monthly-trend-data').textContent);
+        const serviceLabels = JSON.parse(document.getElementById('service-labels-data').textContent);
+        const serviceData = JSON.parse(document.getElementById('service-breakdown-data').textContent);
+
+        // Chart styling configuration defaults
+        Chart.defaults.color = 'rgba(255, 255, 255, 0.6)';
+        Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.08)';
+
+        // 1. Line Chart: Monthly Spend Trend
+        const ctxMonthly = document.getElementById('monthlyTrendChart');
+        if (ctxMonthly) {
+            new Chart(ctxMonthly, {
+                type: 'line',
+                data: {
+                    labels: monthlyLabels,
+                    datasets: [{
+                        label: 'Monthly Cost ({{ currency }})',
+                        data: monthlyData,
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.35,
+                        pointBackgroundColor: '#38bdf8',
+                        pointBorderColor: '#ffffff',
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#38bdf8',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1,
+                            padding: 10,
+                            displayColors: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 2. Doughnut Chart: Service Cost Breakdown
+        const ctxService = document.getElementById('serviceBreakdownChart');
+        if (ctxService) {
+            new Chart(ctxService, {
+                type: 'doughnut',
+                data: {
+                    labels: serviceLabels,
+                    datasets: [{
+                        data: serviceData,
+                        backgroundColor: [
+                            '#6366f1', # Indigo
+                            '#38bdf8', # Sky Blue
+                            '#a855f7', # Purple
+                            '#f43f5e', # Rose Red
+                            '#10b981', # Emerald Green
+                            '#fbbf24'  # Amber Yellow
+                        ],
+                        borderWidth: 1,
+                        borderColor: 'rgba(17, 24, 39, 0.8)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 15,
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#38bdf8',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1,
+                            padding: 10
+                        }
+                    },
+                    cutout: '65%'
+                }
+            });
+        }
+    });
+</script>
+{% endif %}
 {% endblock %}

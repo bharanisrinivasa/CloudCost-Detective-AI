@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Anomaly Details - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Header with Back Button -->
+    <div class="mb-4">
+        <a href="{% url 'anomaly-list' %}" class="btn btn-secondary-custom btn-sm mb-3">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to List
+        </a>
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center">
+            <div>
+                <span class="text-info fw-bold text-uppercase tracking-wider text-xs">Anomaly Evidence File</span>
+                <h1 class="fw-bold mt-1 mb-0">{{ anomaly.get_anomaly_type_display }}</h1>
+                <p class="text-secondary text-sm mb-0">Detected Date: {{ anomaly.detected_date }}</p>
+            </div>
+            <div class="mt-3 mt-md-0 d-flex gap-2 align-items-center">
+                <!-- Status Badge -->
+                <span class="text-secondary text-sm me-2">Current Status:</span>
+                {% if anomaly.status == 'OPEN' %}
+                    <span class="badge bg-light text-dark border border-light py-2 px-3">OPEN</span>
+                {% elif anomaly.status == 'REVIEWED' %}
+                    <span class="badge bg-primary text-white border border-primary py-2 px-3">REVIEWED</span>
+                {% else %}
+                    <span class="badge bg-secondary text-white border border-secondary py-2 px-3 bg-opacity-50">DISMISSED</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Main details card -->
+        <div class="col-lg-8">
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold text-white mb-4"><i class="fa-solid fa-circle-info text-info me-2"></i>Analysis Summary</h5>
+                
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <span class="text-secondary text-xs d-block text-uppercase">Anomaly Type</span>
+                        <span class="fw-bold text-white">{{ anomaly.get_anomaly_type_display }}</span>
+                    </div>
+                    <div class="col-md-6">
+                        <span class="text-secondary text-xs d-block text-uppercase">Severity Classification</span>
+                        <div>
+                            {% if anomaly.severity == 'CRITICAL' %}
+                                <span class="badge bg-danger text-white border border-danger">CRITICAL</span>
+                            {% elif anomaly.severity == 'HIGH' %}
+                                <span class="badge bg-warning text-dark border border-warning">HIGH</span>
+                            {% elif anomaly.severity == 'MEDIUM' %}
+                                <span class="badge bg-info text-dark border border-info">MEDIUM</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white border border-secondary">LOW</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if anomaly.service_name %}
+                    <div class="col-md-6">
+                        <span class="text-secondary text-xs d-block text-uppercase">Service Name</span>
+                        <span class="fw-bold text-white"><i class="fa-solid fa-server text-info me-2"></i>{{ anomaly.service_name }}</span>
+                    </div>
+                    {% endif %}
+                    {% if anomaly.region %}
+                    <div class="col-md-6">
+                        <span class="text-secondary text-xs d-block text-uppercase">Region Scope</span>
+                        <span class="fw-semibold text-white"><i class="fa-solid fa-location-dot text-info me-2"></i>{{ anomaly.region }}</span>
+                    </div>
+                    {% endif %}
+                    {% if anomaly.resource_id or anomaly.resource_name %}
+                    <div class="col-12">
+                        <div class="p-3 rounded mb-2" style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);">
+                            <span class="text-secondary text-xs d-block text-uppercase mb-1">Targeted Resource Information</span>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <span class="text-secondary text-sm d-block">Resource Name:</span>
+                                    <span class="fw-bold text-white">{{ anomaly.resource_name|default:"N/A" }}</span>
+                                </div>
+                                <div class="col-md-6">
+                                    <span class="text-secondary text-sm d-block">Resource ID:</span>
+                                    <code class="text-info text-xs">{{ anomaly.resource_id|default:"N/A" }}</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <hr class="border-secondary border-opacity-25 my-4">
+
+                <!-- Evidence Text -->
+                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-file-invoice text-info me-2"></i>Evidence &amp; Statistics</h5>
+                <div class="p-4 rounded-3 border-0 mb-4 text-warning" style="background: rgba(245, 158, 11, 0.08); border-left: 4px solid #f59e0b !important;">
+                    <div class="d-flex">
+                        <i class="fa-solid fa-quote-left fs-3 me-3 opacity-50 mt-1"></i>
+                        <p class="fs-5 mb-0 fw-semibold">{{ anomaly.description }}</p>
+                    </div>
+                </div>
+
+                <!-- Numeric details grid -->
+                <div class="row g-3">
+                    <div class="col-md-3 col-6">
+                        <div class="p-3 rounded text-center" style="background: rgba(255, 255, 255, 0.02);">
+                            <span class="text-secondary text-xs d-block text-uppercase mb-1">Actual Cost</span>
+                            <span class="fs-4 fw-extrabold text-info">${{ anomaly.actual_cost|floatformat:2 }}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="p-3 rounded text-center" style="background: rgba(255, 255, 255, 0.02);">
+                            <span class="text-secondary text-xs d-block text-uppercase mb-1">Expected Cost</span>
+                            <span class="fs-4 fw-extrabold text-secondary">${{ anomaly.expected_cost|floatformat:2 }}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="p-3 rounded text-center" style="background: rgba(255, 255, 255, 0.02);">
+                            <span class="text-secondary text-xs d-block text-uppercase mb-1">Cost Increase</span>
+                            <span class="fs-4 fw-extrabold text-warning">+${{ anomaly.cost_increase|floatformat:2 }}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="p-3 rounded text-center" style="background: rgba(255, 255, 255, 0.02);">
+                            <span class="text-secondary text-xs d-block text-uppercase mb-1">Z-score</span>
+                            <span class="fs-4 fw-extrabold text-white">
+                                {% if anomaly.z_score is not None %}
+                                    {{ anomaly.z_score|floatformat:2 }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar management card -->
+        <div class="col-lg-4">
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-user-shield text-info me-2"></i>Actions</h5>
+                <p class="text-secondary text-sm">Review this cost anomaly and update its status appropriately to inform optimization workflows.</p>
+                
+                <form method="POST" action="{% url 'anomaly-update-status' anomaly.pk %}" class="d-flex flex-column gap-2 mt-4">
+                    {% csrf_token %}
+                    <label class="form-label text-secondary text-sm mb-1">Update Status State</label>
+                    <select name="status" class="form-select filter-input mb-3">
+                        {% for status_item in status_choices %}
+                        <option value="{{ status_item.0 }}" {% if anomaly.status == status_item.0 %}selected{% endif %}>
+                            {{ status_item.1 }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    
+                    <button type="submit" class="btn btn-primary-glow w-100 py-2.5">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>Save Changes
+                    </button>
+                </form>
+
+                <hr class="border-secondary border-opacity-25 my-4">
+                
+                <div class="text-xs text-secondary">
+                    <span class="d-block mb-1">Detected At: {{ anomaly.detected_at }}</span>
+                    <span class="d-block">Last Updated: {{ anomaly.updated_at }}</span>
+                    {% if anomaly.billing_upload %}
+                        <span class="d-block mt-2">Attributed Upload: <a href="{% url 'upload-history' %}" class="text-info">{{ anomaly.billing_upload.original_filename }}</a></span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .filter-input {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-primary) !important;
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        transition: var(--transition-smooth);
+    }
+</style>
+{% endblock %}
