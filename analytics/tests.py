@@ -4,12 +4,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from billing.models import BillingUpload, BillingRecord
-from analytics.models import CostAnomaly
+from analytics.models import CostAnomaly, WasteFinding
 from analytics.services.anomaly_detector import (
     run_anomaly_detection_for_user,
     classify_severity,
     calculate_stats
 )
+from analytics.services.waste_detector import run_waste_detection_for_user
 
 User = get_user_model()
 
@@ -566,3 +567,528 @@ class AnomalyDetectionTests(TestCase):
         # Test LOW severity with exact Decimals
         sev_low = classify_severity(z_score=1.0, deviation_pct=Decimal("10.0"), cost_impact=Decimal("29.99"))
         self.assertEqual(sev_low, "LOW")
+
+
+class WasteDetectionTests(TestCase):
+    def setUp(self):
+        # Create users
+        self.user_a = User.objects.create_user(username="usera_w", email="a_w@example.com", password="password123")
+        self.user_b = User.objects.create_user(username="userb_w", email="b_w@example.com", password="password123")
+        
+        # Create billing uploads
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            upload_type="Billing Report",
+            original_filename="user_a_billing.csv"
+        )
+        self.upload_b = BillingUpload.objects.create(
+            uploaded_by=self.user_b,
+            upload_type="Billing Report",
+            original_filename="user_b_billing.csv"
+        )
+        
+        self.list_url = reverse("waste-list")
+        self.trigger_url = reverse("waste-trigger")
+
+    def test_authentication_required(self):
+        """Verify accessing waste views redirects to login."""
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 302)
+        
+        response = self.client.post(self.trigger_url)
+        self.assertEqual(response.status_code, 302)
+
+    def test_user_isolation(self):
+        """Verify User A cannot view User B's waste findings."""
+        finding_b = WasteFinding.objects.create(
+            user=self.user_b,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="id:ocid-b",
+            resource_id="ocid-b",
+            service_name="Compute",
+            first_seen=datetime.date(2026, 1, 1),
+            last_seen=datetime.date(2026, 1, 10),
+            observation_days=10,
+            calendar_span_days=10,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("15.00"),
+            average_daily_cost=Decimal("1.50"),
+            estimated_monthly_cost=Decimal("45.00"),
+            estimated_monthly_savings=Decimal("22.50"),
+            confidence="MEDIUM",
+            evidence="Evidence",
+            status="OPEN"
+        )
+        
+        self.client.login(username="usera_w", password="password123")
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(finding_b, response.context["findings"])
+        
+        detail_url = reverse("waste-detail", kwargs={"pk": finding_b.pk})
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 403)
+        
+        status_url = reverse("waste-update-status", kwargs={"pk": finding_b.pk})
+        response = self.client.post(status_url, {"status": "REVIEWED"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_billing_records_produces_no_findings(self):
+        """Verify running detection on empty billing records returns gracefully."""
+        results = run_waste_detection_for_user(self.user_a)
+        self.assertEqual(results["created"], 0)
+        self.assertEqual(results["analyzed"], 0)
+
+    def test_insufficient_observation_window_produces_no_findings(self):
+        """Verify resources with fewer than 7 observed dates are skipped."""
+        # Create 5 days of billing records
+        for i in range(5):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00")
+            )
+        results = run_waste_detection_for_user(self.user_a)
+        self.assertEqual(results["created"], 0)
+
+    def test_insufficient_coverage_ratio_produces_no_findings(self):
+        """Verify resources with less than 70% coverage ratio are skipped."""
+        # Span: 1 to 15 (15 days), but only seen on 6 dates (coverage = 6/15 = 40%)
+        dates = [1, 2, 3, 13, 14, 15]
+        for d in dates:
+            day = datetime.date(2026, 1, d)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00")
+            )
+        results = run_waste_detection_for_user(self.user_a)
+        self.assertEqual(results["created"], 0)
+
+    def test_resource_identity_and_fallback(self):
+        """Verify resource key is generated from resource_id first, falling back to resource_name."""
+        # Case A: Resource ID exists
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                resource_name="Instance-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+        
+        # Case B: Only Resource Name exists (fallback)
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="",
+                resource_name="NameOnlyInstance",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+
+        run_waste_detection_for_user(self.user_a)
+        
+        # Verify findings exist with correct keys
+        self.assertTrue(WasteFinding.objects.filter(resource_key="id:ocid-1").exists())
+        self.assertTrue(WasteFinding.objects.filter(resource_key="name:NameOnlyInstance").exists())
+
+    def test_missing_resource_identity_skipped(self):
+        """Verify records missing both resource ID and name are skipped."""
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="",
+                resource_name="",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+        results = run_waste_detection_for_user(self.user_a)
+        self.assertEqual(results["created"], 0)
+
+    def test_same_resource_id_with_changed_resource_name_updates_finding(self):
+        """Verify updating a resource name for the same resource_id refreshes the name without creating duplicate."""
+        # 1st run: name is "OldName"
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                resource_name="OldName",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+        run_waste_detection_for_user(self.user_a)
+        self.assertEqual(WasteFinding.objects.filter(resource_key="id:ocid-1", waste_type="PERSISTENT_LOW_COST_RESOURCE").count(), 1)
+        self.assertEqual(WasteFinding.objects.get(resource_key="id:ocid-1", waste_type="PERSISTENT_LOW_COST_RESOURCE").resource_name, "OldName")
+        
+        # 2nd run: name is "NewName"
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 8)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                resource_name="NewName",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+        run_waste_detection_for_user(self.user_a)
+        # Verify it updated the existing finding rather than creating a new one
+        self.assertEqual(WasteFinding.objects.filter(resource_key="id:ocid-1", waste_type="PERSISTENT_LOW_COST_RESOURCE").count(), 1)
+        self.assertEqual(WasteFinding.objects.get(resource_key="id:ocid-1", waste_type="PERSISTENT_LOW_COST_RESOURCE").resource_name, "NewName")
+
+    def test_different_currencies_remain_separate_findings(self):
+        """Verify that records with different currencies create separate findings for the same resource ID."""
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            # USD
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00"),
+                currency="USD"
+            )
+            # EUR
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00"),
+                currency="EUR"
+            )
+            
+        run_waste_detection_for_user(self.user_a)
+        findings = WasteFinding.objects.filter(resource_key="id:ocid-1", waste_type="PERSISTENT_LOW_COST_RESOURCE")
+        self.assertEqual(findings.count(), 2)
+        self.assertTrue(findings.filter(currency="USD").exists())
+        self.assertTrue(findings.filter(currency="EUR").exists())
+
+    def test_unsupported_usage_units_skip_dormant_detection(self):
+        """Verify that unsupported usage units skip dormant cost pattern detection."""
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00"),
+                usage_quantity=Decimal("0.00"),
+                usage_unit="ArbitraryUnit" # Unsupported unit for Compute
+            )
+        run_waste_detection_for_user(self.user_a)
+        # Dormant cost pattern should not be created (Persistent Low Cost might be created if thresholds match,
+        # but let's confirm DORMANT_COST_PATTERN is absent)
+        self.assertFalse(WasteFinding.objects.filter(waste_type="DORMANT_COST_PATTERN").exists())
+
+    def test_inconsistent_usage_units_skip_dormant_detection(self):
+        """Verify that inconsistent usage units for the same resource skip dormant detection."""
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            # Mix OCPU-Hours and GB-Hours
+            unit = "OCPU-Hours" if i % 2 == 0 else "GB-Hours"
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00"),
+                usage_quantity=Decimal("0.00"),
+                usage_unit=unit
+            )
+        run_waste_detection_for_user(self.user_a)
+        self.assertFalse(WasteFinding.objects.filter(waste_type="DORMANT_COST_PATTERN").exists())
+
+    def test_storage_heuristic_confidence_cap(self):
+        """Verify POSSIBLE_UNUSED_STORAGE never exceeds MEDIUM confidence."""
+        # 15 days of stable storage costs (variance = 0)
+        for i in range(15):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-vol",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00"),
+                usage_unit="GB-Months",
+                usage_quantity=Decimal("10.00")
+            )
+        run_waste_detection_for_user(self.user_a)
+        
+        # Verify finding created
+        finding = WasteFinding.objects.get(waste_type="POSSIBLE_UNUSED_STORAGE")
+        # Capped at MEDIUM confidence
+        self.assertEqual(finding.confidence, "MEDIUM")
+        # Verify evidence uses correct conservative language
+        self.assertIn("Storage resource shows stable recurring billing with low or unchanged recorded usage under a validated billing unit.", finding.evidence)
+        self.assertIn("potential optimization candidate", finding.evidence.lower())
+        self.assertNotIn("unattached", finding.evidence.lower())
+
+    def test_repeated_detection_remains_idempotent_and_updates(self):
+        """Verify repeated waste runs update existing OPEN findings without creating duplicates."""
+        for i in range(7):
+            day = datetime.date(2026, 1, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-1",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("1.00")
+            )
+            
+        results_1 = run_waste_detection_for_user(self.user_a)
+        self.assertGreater(results_1["created"], 0)
+        self.assertEqual(results_1["updated"], 0)
+        
+        # Check initial counts
+        initial_count = WasteFinding.objects.filter(user=self.user_a).count()
+        
+        # Run again
+        results_2 = run_waste_detection_for_user(self.user_a)
+        self.assertEqual(results_2["created"], 0)
+        self.assertGreater(results_2["updated"], 0)
+        
+        # Verify no duplicate findings were created
+        self.assertEqual(WasteFinding.objects.filter(user=self.user_a).count(), initial_count)
+
+    def test_status_transitions_and_ownership(self):
+        """Verify status workflow status updates respect authentication and user isolation."""
+        finding = WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="id:ocid-1",
+            resource_id="ocid-1",
+            service_name="Compute",
+            first_seen=datetime.date(2026, 1, 1),
+            last_seen=datetime.date(2026, 1, 10),
+            observation_days=10,
+            calendar_span_days=10,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("15.00"),
+            average_daily_cost=Decimal("1.50"),
+            estimated_monthly_cost=Decimal("45.00"),
+            estimated_monthly_savings=Decimal("22.50"),
+            confidence="MEDIUM",
+            evidence="Evidence",
+            status="OPEN"
+        )
+        
+        self.client.login(username="usera_w", password="password123")
+        status_url = reverse("waste-update-status", kwargs={"pk": finding.pk})
+        
+        # Transition to REVIEWED
+        response = self.client.post(status_url, {"status": "REVIEWED"})
+        self.assertEqual(response.status_code, 302)
+        finding.refresh_from_db()
+        self.assertEqual(finding.status, "REVIEWED")
+        
+        # Transition to DISMISSED
+        response = self.client.post(status_url, {"status": "DISMISSED"})
+        self.assertEqual(response.status_code, 302)
+        finding.refresh_from_db()
+        self.assertEqual(finding.status, "DISMISSED")
+
+    def test_dashboard_waste_counters_and_multi_currency(self):
+        """Verify the dashboard page displays waste findings metrics and separates multi-currency saving values."""
+        # Create open findings in different currencies
+        WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="id:ocid-usd",
+            service_name="Compute",
+            currency="USD",
+            first_seen=datetime.date(2026, 1, 1),
+            last_seen=datetime.date(2026, 1, 10),
+            observation_days=10,
+            calendar_span_days=10,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("15.00"),
+            average_daily_cost=Decimal("1.50"),
+            estimated_monthly_cost=Decimal("45.00"),
+            estimated_monthly_savings=Decimal("20.00"),
+            status="OPEN"
+        )
+        WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="id:ocid-eur",
+            service_name="Compute",
+            currency="EUR",
+            first_seen=datetime.date(2026, 1, 1),
+            last_seen=datetime.date(2026, 1, 10),
+            observation_days=10,
+            calendar_span_days=10,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("15.00"),
+            average_daily_cost=Decimal("1.50"),
+            estimated_monthly_cost=Decimal("45.00"),
+            estimated_monthly_savings=Decimal("30.00"),
+            status="OPEN"
+        )
+        
+        self.client.login(username="usera_w", password="password123")
+        dashboard_url = reverse("dashboard-home")
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 200)
+        
+        self.assertEqual(response.context["open_waste_count"], 2)
+        self.assertIn("20.00 USD", response.context["potential_waste_savings"])
+        self.assertIn("30.00 EUR", response.context["potential_waste_savings"])
+        self.assertTrue(response.context["waste_has_multiple_currencies"])
+
+    def test_stale_resource_cost_logic(self):
+        """Verify STALE_RESOURCE_COST checks cost and usage stability correctly."""
+        # 1. Stable cost + stable compatible usage -> finding allowed
+        for i in range(15):
+            day = datetime.date(2026, 2, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-stable",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="OCPU-Hours",
+                usage_quantity=Decimal("5.00")
+            )
+            
+        # 2. Stable cost + volatile compatible usage -> NO stale finding
+        for i in range(15):
+            day = datetime.date(2026, 2, i + 1)
+            # cost is stable ($10.00), usage is volatile (varies between 5 and 50)
+            usage_qty = Decimal("5.00") if i % 2 == 0 else Decimal("50.00")
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-volatile-usage",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="OCPU-Hours",
+                usage_quantity=usage_qty
+            )
+            
+        # 3. Stable cost + unsupported usage unit -> conservative finding allowed
+        for i in range(15):
+            day = datetime.date(2026, 2, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="ocid-unsupported-unit",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="UnsupportedUnit",
+                usage_quantity=Decimal("5.00")
+            )
+            
+        run_waste_detection_for_user(self.user_a)
+        
+        # Verify Case 1 finding exists (and is HIGH confidence)
+        finding_stable = WasteFinding.objects.get(resource_key="id:ocid-stable", waste_type="STALE_RESOURCE_COST")
+        self.assertEqual(finding_stable.confidence, "HIGH")
+        self.assertNotIn("usage metrics unavailable/incompatible", finding_stable.evidence)
+        
+        # Verify Case 2: NO stale finding exists for ocid-volatile-usage
+        self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-volatile-usage", waste_type="STALE_RESOURCE_COST").exists())
+        
+        # Verify Case 3 finding exists (and is capped at MEDIUM confidence, with conservative evidence)
+        finding_unsupported = WasteFinding.objects.get(resource_key="id:ocid-unsupported-unit", waste_type="STALE_RESOURCE_COST")
+        self.assertEqual(finding_unsupported.confidence, "MEDIUM")
+        self.assertIn("usage metrics unavailable/incompatible", finding_unsupported.evidence)
+
+    def test_possible_unused_storage_logic(self):
+        """Verify POSSIBLE_UNUSED_STORAGE checks storage service, unit compatibility, and variance stability."""
+        # 1. Storage + stable cost + stable/low compatible usage -> finding allowed
+        for i in range(15):
+            day = datetime.date(2026, 3, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-storage-ok",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="GB-Months",
+                usage_quantity=Decimal("10.00")
+            )
+            
+        # 2. Storage + volatile usage -> no POSSIBLE_UNUSED_STORAGE finding
+        for i in range(15):
+            day = datetime.date(2026, 3, i + 1)
+            usage_qty = Decimal("10.00") if i % 2 == 0 else Decimal("100.00")
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-storage-volatile-usage",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="GB-Months",
+                usage_quantity=usage_qty
+            )
+            
+        # 3. Storage + unsupported usage unit -> no POSSIBLE_UNUSED_STORAGE finding
+        for i in range(15):
+            day = datetime.date(2026, 3, i + 1)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-storage-unsupported-unit",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit="UnsupportedUnit",
+                usage_quantity=Decimal("10.00")
+            )
+            
+        # 4. Storage + inconsistent usage units -> no POSSIBLE_UNUSED_STORAGE finding
+        for i in range(15):
+            day = datetime.date(2026, 3, i + 1)
+            unit = "GB-Months" if i % 2 == 0 else "GB"
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-storage-inconsistent-units",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=Decimal("10.00"),
+                usage_unit=unit,
+                usage_quantity=Decimal("10.00")
+            )
+            
+        # 5. Storage + volatile cost -> no POSSIBLE_UNUSED_STORAGE finding
+        for i in range(15):
+            day = datetime.date(2026, 3, i + 1)
+            cost_val = Decimal("10.00") if i % 2 == 0 else Decimal("50.00")
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Block Volume",
+                resource_id="ocid-storage-volatile-cost",
+                usage_start=datetime.datetime.combine(day, datetime.time(10, 0)),
+                cost=cost_val,
+                usage_unit="GB-Months",
+                usage_quantity=Decimal("10.00")
+            )
+            
+        run_waste_detection_for_user(self.user_a)
+        
+        # Verify Case 1 finding exists and has confidence capped at MEDIUM
+        finding_ok = WasteFinding.objects.get(resource_key="id:ocid-storage-ok", waste_type="POSSIBLE_UNUSED_STORAGE")
+        self.assertEqual(finding_ok.confidence, "MEDIUM")
+        self.assertIn("Storage resource shows stable recurring billing with low or unchanged recorded usage under a validated billing unit.", finding_ok.evidence)
+        
+        # Verify Case 2, 3, 4, 5 do not have POSSIBLE_UNUSED_STORAGE findings
+        self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-volatile-usage", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
+        self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-unsupported-unit", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
+        self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-inconsistent-units", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
+        self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-volatile-cost", waste_type="POSSIBLE_UNUSED_STORAGE").exists())

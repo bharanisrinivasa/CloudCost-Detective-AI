@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Waste Findings - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Header & Action Trigger -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">AI FinOps Engine</span>
+            <h1 class="fw-bold mt-1 mb-0">Resource Waste Detection</h1>
+        </div>
+        <div class="mt-3 mt-md-0">
+            <form method="POST" action="{% url 'waste-trigger' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary-glow px-4 py-2.5">
+                    <i class="fa-solid fa-radar me-2 animate-pulse"></i>Run Waste Detection
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Summary KPI Cards -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Estimated Potential Monthly Savings</span>
+                    <h2 class="fw-extrabold text-info m-0">
+                        {{ potential_savings_display }}
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-piggy-bank me-2 text-info"></i>
+                    {% if has_multiple_currencies %}
+                        <span class="text-warning">Multiple currencies detected</span>
+                    {% else %}
+                        <span>Aggregated potential waste savings</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Resources Analyzed</span>
+                    <h2 class="fw-extrabold text-white m-0">
+                        {{ total_analyzed_resources }}
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-server me-2 text-info"></i>
+                    <span>Total unique resource IDs / names scanned</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Active Waste Findings</span>
+                    <h2 class="fw-extrabold text-warning m-0">
+                        {{ findings.count }}
+                    </h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                    <i class="fa-solid fa-circle-exclamation me-2 text-warning"></i>
+                    <span>Potential optimization candidates</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if has_multiple_currencies %}
+    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert" style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
+        <div class="d-flex align-items-center">
+            <i class="fa-solid fa-triangle-exclamation me-2 fs-5"></i>
+            <div>Multiple currencies detected. Separate totals are displayed above. Combined monetary calculations are not aggregated to prevent currency mismatches.</div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Filters Section -->
+    <div class="card glass-card p-4 mb-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-sliders text-info me-2"></i>Filter Options</h5>
+        <form method="GET" action="{% url 'waste-list' %}" class="row g-3">
+            <div class="col-md-2.5 col-lg-2">
+                <label class="form-label text-secondary text-sm">Waste Type</label>
+                <select name="waste_type" class="form-select filter-input">
+                    <option value="">All Types</option>
+                    {% for choice in waste_type_choices %}
+                    <option value="{{ choice.0 }}" {% if active_filters.waste_type == choice.0 %}selected{% endif %}>{{ choice.1 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Confidence</label>
+                <select name="confidence" class="form-select filter-input">
+                    <option value="">All Confidences</option>
+                    {% for choice in confidence_choices %}
+                    <option value="{{ choice.0 }}" {% if active_filters.confidence == choice.0 %}selected{% endif %}>{{ choice.1 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Status</label>
+                <select name="status" class="form-select filter-input">
+                    <option value="">All Statuses</option>
+                    {% for choice in status_choices %}
+                    <option value="{{ choice.0 }}" {% if active_filters.status == choice.0 %}selected{% endif %}>{{ choice.1 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3 col-lg-3">
+                <label class="form-label text-secondary text-sm">Service</label>
+                <select name="service_name" class="form-select filter-input">
+                    <option value="">All Services</option>
+                    {% for svc in available_services %}
+                    <option value="{{ svc }}" {% if active_filters.service_name == svc %}selected{% endif %}>{{ svc }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2.5 col-lg-3">
+                <label class="form-label text-secondary text-sm">Region</label>
+                <select name="region" class="form-select filter-input">
+                    <option value="">All Regions</option>
+                    {% for reg in available_regions %}
+                    <option value="{{ reg }}" {% if active_filters.region == reg %}selected{% endif %}>{{ reg }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 d-flex justify-content-end gap-2 mt-3">
+                <button type="submit" class="btn btn-primary-glow px-4">
+                    <i class="fa-solid fa-filter me-1"></i>Apply Filters
+                </button>
+                <a href="{% url 'waste-list' %}" class="btn reset-btn px-4">
+                    <i class="fa-solid fa-rotate-left me-1"></i>Reset
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Findings Table List -->
+    <div class="card glass-card p-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-trash-can text-danger me-2"></i>Waste Findings Log</h5>
+        <div class="table-responsive">
+            <table class="table table-borderless table-custom m-0">
+                <thead>
+                    <tr>
+                        <th>Resource</th>
+                        <th>Service</th>
+                        <th>Region</th>
+                        <th>Waste Type</th>
+                        <th class="text-end">Observed Period</th>
+                        <th class="text-end">Monthly Cost</th>
+                        <th class="text-end">Potential Savings</th>
+                        <th>Confidence</th>
+                        <th>Status</th>
+                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for finding in findings %}
+                    <tr>
+                        <td class="fw-semibold text-white">
+                            <span class="text-sm text-secondary d-block" title="{{ finding.resource_id }}">
+                                <i class="fa-solid fa-cube me-1"></i>{{ finding.resource_name|default:finding.resource_id }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="text-sm text-white">
+                                {{ finding.service_name }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="text-sm text-secondary">
+                                {{ finding.region|default:"N/A" }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary bg-opacity-20 text-info border border-secondary border-opacity-35 text-xs">
+                                {{ finding.get_waste_type_display }}
+                            </span>
+                        </td>
+                        <td class="text-end text-white text-sm">
+                            {{ finding.observation_days }} days
+                        </td>
+                        <td class="text-end fw-semibold text-white">
+                            {{ finding.estimated_monthly_cost|floatformat:2 }} {{ finding.currency }}
+                        </td>
+                        <td class="text-end text-success fw-semibold">
+                            {{ finding.estimated_monthly_savings|floatformat:2 }} {{ finding.currency }}
+                        </td>
+                        <td>
+                            {% if finding.confidence == 'HIGH' %}
+                                <span class="badge bg-danger text-white border border-danger">HIGH</span>
+                            {% elif finding.confidence == 'MEDIUM' %}
+                                <span class="badge bg-warning text-dark border border-warning">MEDIUM</span>
+                            {% else %}
+                                <span class="badge bg-info text-dark border border-info">LOW</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if finding.status == 'OPEN' %}
+                                <span class="badge bg-light text-dark border border-light">OPEN</span>
+                            {% elif finding.status == 'REVIEWED' %}
+                                <span class="badge bg-primary text-white border border-primary">REVIEWED</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white border border-secondary bg-opacity-50">DISMISSED</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <a href="{% url 'waste-detail' finding.pk %}" class="btn btn-secondary-custom btn-sm">
+                                <i class="fa-solid fa-eye me-1"></i>Details
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center text-secondary py-5">
+                            <i class="fa-solid fa-circle-check fs-1 text-success mb-3 d-block"></i>
+                            No waste findings detected matching active filters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

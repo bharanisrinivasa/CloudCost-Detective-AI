@@ -76,3 +76,62 @@ class CostAnomaly(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_anomaly_type_display()} on {self.detected_date} ({self.severity})"
+
+
+class WasteFinding(models.Model):
+    STATUS_CHOICES = (
+        ("OPEN", "Open"),
+        ("REVIEWED", "Reviewed"),
+        ("DISMISSED", "Dismissed"),
+    )
+    CONFIDENCE_CHOICES = (
+        ("LOW", "Low"),
+        ("MEDIUM", "Medium"),
+        ("HIGH", "High"),
+    )
+    
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="waste_findings"
+    )
+    waste_type = models.CharField(max_length=50)
+    resource_key = models.CharField(max_length=500, blank=True, default="")
+    resource_id = models.CharField(max_length=500, blank=True, default="")
+    resource_name = models.CharField(max_length=255, blank=True, default="")
+    service_name = models.CharField(max_length=200)
+    region = models.CharField(max_length=200, blank=True, default="")
+    currency = models.CharField(max_length=10, default="USD")
+    
+    first_seen = models.DateField()
+    last_seen = models.DateField()
+    observation_days = models.IntegerField()
+    calendar_span_days = models.IntegerField()
+    coverage_ratio = models.DecimalField(max_digits=5, decimal_places=4)
+    
+    total_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    average_daily_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    estimated_monthly_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    estimated_monthly_savings = models.DecimalField(max_digits=12, decimal_places=2)
+    
+    confidence = models.CharField(max_length=20, choices=CONFIDENCE_CHOICES, default="LOW")
+    evidence = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="OPEN")
+    
+    detected_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["user", "waste_type"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "waste_type", "resource_key", "service_name", "currency"],
+                name="unique_user_waste_event"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.waste_type} - {self.resource_name or self.resource_id} ({self.status})"

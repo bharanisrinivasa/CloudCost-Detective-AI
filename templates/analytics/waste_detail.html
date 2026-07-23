@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Waste Finding Details - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Breadcrumb / Back Link -->
+    <div class="mb-4">
+        <a href="{% url 'waste-list' %}" class="text-info text-decoration-none">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to Waste Findings Log
+        </a>
+    </div>
+
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="badge bg-secondary bg-opacity-20 text-info border border-secondary border-opacity-35 text-xs text-uppercase mb-2">
+                {{ finding.get_waste_type_display }}
+            </span>
+            <h1 class="fw-bold m-0 text-white">
+                {{ finding.resource_name|default:finding.resource_id }}
+            </h1>
+        </div>
+        <div class="mt-3 mt-md-0 d-flex gap-2">
+            <!-- Status Update Action Form -->
+            <form method="POST" action="{% url 'waste-update-status' finding.pk %}" class="d-flex align-items-center gap-2">
+                {% csrf_token %}
+                <label class="text-secondary text-sm me-2">Update Status:</label>
+                <select name="status" class="form-select filter-input py-1 px-3" style="width: auto;" onchange="this.form.submit()">
+                    {% for status_opt in status_choices %}
+                    <option value="{{ status_opt.0 }}" {% if finding.status == status_opt.0 %}selected{% endif %}>{{ status_opt.1 }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Findings Metrics & Metadata -->
+        <div class="col-lg-8">
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-circle-info text-info me-2"></i>Waste Evidence & Cost Optimization Details</h5>
+                
+                <!-- Highlights Row -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6 col-lg-4">
+                        <div class="p-3 rounded bg-secondary bg-opacity-10 border border-secondary border-opacity-15">
+                            <span class="text-secondary text-xs d-block mb-1">Estimated Potential Savings</span>
+                            <h3 class="fw-bold text-success m-0">
+                                {{ finding.estimated_monthly_savings|floatformat:2 }} <span class="fs-6 fw-normal">{{ finding.currency }}</span>
+                            </h3>
+                            <span class="text-xs text-muted">Estimated Potential Savings</span>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="p-3 rounded bg-secondary bg-opacity-10 border border-secondary border-opacity-15">
+                            <span class="text-secondary text-xs d-block mb-1">Estimated Monthly Cost</span>
+                            <h3 class="fw-bold text-white m-0">
+                                {{ finding.estimated_monthly_cost|floatformat:2 }} <span class="fs-6 fw-normal">{{ finding.currency }}</span>
+                            </h3>
+                            <span class="text-xs text-muted">Estimated monthly run rate</span>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="p-3 rounded bg-secondary bg-opacity-10 border border-secondary border-opacity-15">
+                            <span class="text-secondary text-xs d-block mb-1">Confidence Score</span>
+                            <h3 class="fw-bold m-0 {% if finding.confidence == 'HIGH' %}text-danger{% elif finding.confidence == 'MEDIUM' %}text-warning{% else %}text-info{% endif %}">
+                                {{ finding.confidence }}
+                            </h3>
+                            <span class="text-xs text-muted">Heuristic certainty rating</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Parameters Grid -->
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <span class="text-secondary text-sm d-block">First Seen</span>
+                        <span class="text-white fw-semibold">{{ finding.first_seen }}</span>
+                    </div>
+                    <div class="col-md-6">
+                        <span class="text-secondary text-sm d-block">Last Seen</span>
+                        <span class="text-white fw-semibold">{{ finding.last_seen }}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-secondary text-sm d-block">Observed Days</span>
+                        <span class="text-white fw-semibold">{{ finding.observation_days }} days</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-secondary text-sm d-block">Calendar Span</span>
+                        <span class="text-white fw-semibold">{{ finding.calendar_span_days }} days</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-secondary text-sm d-block">Coverage Ratio</span>
+                        <span class="text-white fw-semibold">{{ finding.coverage_ratio|floatformat:2 }}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-secondary text-sm d-block">Total Observed Cost</span>
+                        <span class="text-white fw-semibold">{{ finding.total_cost|floatformat:2 }} {{ finding.currency }}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-secondary text-sm d-block">Average Daily Cost</span>
+                        <span class="text-white fw-semibold">{{ finding.average_daily_cost|floatformat:2 }} {{ finding.currency }}</span>
+                    </div>
+                </div>
+
+                <hr class="border-secondary border-opacity-35 my-4">
+
+                <!-- Evidence Text -->
+                <div class="mb-2">
+                    <span class="text-secondary text-sm d-block mb-1">Deterministic Evidence Log:</span>
+                    <div class="p-3 rounded bg-dark border border-secondary border-opacity-25 font-monospace text-sm text-info">
+                        {{ finding.evidence }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resource Context Sidebar -->
+        <div class="col-lg-4">
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-cube text-info me-2"></i>Resource Attributes</h5>
+                
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Resource ID</span>
+                    <span class="text-white text-sm text-break font-monospace">{{ finding.resource_id|default:"N/A" }}</span>
+                </div>
+                
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Resource Name</span>
+                    <span class="text-white text-sm fw-semibold">{{ finding.resource_name|default:"N/A" }}</span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Service Name</span>
+                    <span class="text-white text-sm fw-semibold">{{ finding.service_name }}</span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Region</span>
+                    <span class="text-white text-sm fw-semibold">{{ finding.region|default:"N/A" }}</span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Currency</span>
+                    <span class="text-white text-sm fw-semibold">{{ finding.currency }}</span>
+                </div>
+                
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Resource Key</span>
+                    <span class="text-muted text-xs font-monospace">{{ finding.resource_key }}</span>
+                </div>
+            </div>
+            
+            <div class="alert alert-secondary border-0 bg-secondary bg-opacity-10 p-3" role="alert">
+                <div class="d-flex">
+                    <i class="fa-solid fa-circle-question text-info fs-5 me-2 mt-0.5"></i>
+                    <div class="text-secondary text-xs">
+                        <strong class="text-white">Note on Telemetry Limitations</strong><br>
+                        This finding is identified purely through billing-cost history patterns as a potential optimization candidate. Real-time resource utilization (CPU, network, attachment, or active instance state) will be verified in Module 14.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
