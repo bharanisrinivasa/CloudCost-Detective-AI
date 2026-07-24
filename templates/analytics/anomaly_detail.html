@@ -130,7 +130,141 @@
                     </div>
                 </div>
             </div>
+
+            <!-- AI Explanation Section -->
+            <div class="card glass-card p-4 mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h5 class="fw-bold text-white mb-0">
+                        <i class="fa-solid fa-wand-magic-sparkles text-info me-2"></i>AI Cost Explanation
+                    </h5>
+                    {% if anomaly.ai_explanation %}
+                        <form method="POST" action="{% url 'ai_engine:explain-anomaly' anomaly.pk %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="regenerate" value="true">
+                            <button type="submit" class="btn btn-secondary-custom btn-sm">
+                                <i class="fa-solid fa-arrows-rotate me-1"></i>Regenerate Explanation
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+
+                {% if anomaly.ai_explanation %}
+                    {% if anomaly.ai_explanation.status == 'GENERATED' %}
+                        {% if anomaly.is_explanation_stale %}
+                            <div class="alert alert-warning border-0 bg-warning bg-opacity-10 p-3 mb-4" role="alert">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <div class="d-flex text-warning text-sm">
+                                        <i class="fa-solid fa-triangle-exclamation fs-5 me-2 mt-0.5"></i>
+                                        <div>
+                                            <strong class="text-white">Source evidence has changed.</strong><br>
+                                            The underlying billing evidence for this anomaly has changed since the explanation was generated. Please regenerate it.
+                                        </div>
+                                    </div>
+                                    <form method="POST" action="{% url 'ai_engine:explain-anomaly' anomaly.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="regenerate" value="true">
+                                        <button type="submit" class="btn btn-warning btn-sm text-dark fw-bold ms-3">
+                                            Regenerate Now
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        {% endif %}
+
+                        <div class="explanation-content text-secondary text-sm">
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Summary</h6>
+                                <p class="text-white fs-6 fw-normal mb-0">{{ anomaly.ai_explanation.summary }}</p>
+                            </div>
+
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Why This Was Flagged</h6>
+                                <p class="mb-0">{{ anomaly.ai_explanation.why_flagged }}</p>
+                            </div>
+
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Supporting Evidence</h6>
+                                <ul class="ps-3 mb-0">
+                                    {% for item in anomaly.ai_explanation.evidence_summary.splitlines %}
+                                        {% if item %}
+                                            <li class="mb-1">{{ item }}</li>
+                                        {% endif %}
+                                    {% endfor %}
+                                </ul>
+                            </div>
+
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Financial Impact</h6>
+                                <p class="mb-0">{{ anomaly.ai_explanation.financial_impact }}</p>
+                            </div>
+
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Confidence / Severity Context</h6>
+                                <p class="mb-0">{{ anomaly.ai_explanation.confidence_explanation }}</p>
+                            </div>
+
+                            <div class="mb-4">
+                                <h6 class="text-white fw-bold text-uppercase text-xs tracking-wider mb-2">Recommended Next Step</h6>
+                                <p class="mb-0">{{ anomaly.ai_explanation.recommended_next_step }}</p>
+                            </div>
+
+                            <div class="mb-0 p-3 rounded bg-secondary bg-opacity-10 border border-secondary border-opacity-15">
+                                <div class="d-flex">
+                                    <i class="fa-solid fa-circle-info text-info fs-5 me-2 mt-0.5"></i>
+                                    <div class="text-xs">
+                                        <strong class="text-white">Model Attribution & Limitations</strong><br>
+                                        <p class="mb-1 text-muted">Generated by <code>{{ anomaly.ai_explanation.model_name }}</code> using prompt version <code>{{ anomaly.ai_explanation.prompt_version }}</code> at {{ anomaly.ai_explanation.generated_at }}.</p>
+                                        <span class="text-muted">AI-generated explanation based on deterministic billing evidence. {{ anomaly.ai_explanation.limitations }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    {% elif anomaly.ai_explanation.status == 'FAILED' %}
+                        <div class="alert alert-danger border-0 bg-danger bg-opacity-10 p-4" role="alert">
+                            <div class="d-flex">
+                                <i class="fa-solid fa-circle-exclamation text-danger fs-4 me-3 mt-1"></i>
+                                <div>
+                                    <h6 class="text-white fw-bold mb-1">Explanation Generation Failed</h6>
+                                    <p class="text-secondary text-sm mb-3">
+                                        {% if anomaly.ai_explanation.error_message == 'MISSING_API_KEY' %}
+                                            AI service is not configured.
+                                        {% elif anomaly.ai_explanation.error_message == 'TIMEOUT' %}
+                                            AI explanation generation timed out. Please try again.
+                                        {% elif anomaly.ai_explanation.error_message == 'RATE_LIMIT' %}
+                                            AI explanation service is temporarily busy. Please try again later.
+                                        {% elif anomaly.ai_explanation.error_message == 'INVALID_RESPONSE' %}
+                                            The AI provider returned an invalid explanation.
+                                        {% else %}
+                                            AI explanation generation is temporarily unavailable.
+                                        {% endif %}
+                                    </p>
+                                    <form method="POST" action="{% url 'ai_engine:explain-anomaly' anomaly.pk %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-danger btn-sm text-white px-4 py-2">
+                                            <i class="fa-solid fa-rotate me-1"></i>Retry Generation
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fa-solid fa-robot text-secondary fs-1 mb-3 opacity-25"></i>
+                        <p class="text-secondary text-sm mb-4">No AI explanation has been generated for this anomaly yet.</p>
+                        <form method="POST" action="{% url 'ai_engine:explain-anomaly' anomaly.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-primary-glow px-4 py-2.5">
+                                <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Generate AI Explanation
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
         </div>
+
 
         <!-- Sidebar management card -->
         <div class="col-lg-4">

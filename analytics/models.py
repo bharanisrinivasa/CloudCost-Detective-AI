@@ -74,6 +74,21 @@ class CostAnomaly(models.Model):
     def cost_increase(self):
         return self.actual_cost - self.expected_cost
 
+    @property
+    def ai_explanation(self):
+        from ai_engine.models import AIExplanation
+        return AIExplanation.objects.filter(user=self.user, source_type="ANOMALY", source_id=self.pk).first()
+
+    @property
+    def is_explanation_stale(self):
+        explanation = self.ai_explanation
+        if not explanation or explanation.status != "GENERATED":
+            return False
+        from ai_engine.services.explanation_service import get_anomaly_deterministic_data, calculate_input_hash
+        current_data = get_anomaly_deterministic_data(self)
+        current_hash = calculate_input_hash(current_data)
+        return explanation.input_hash != current_hash
+
     def __str__(self) -> str:
         return f"{self.get_anomaly_type_display()} on {self.detected_date} ({self.severity})"
 
@@ -133,5 +148,21 @@ class WasteFinding(models.Model):
             )
         ]
 
+    @property
+    def ai_explanation(self):
+        from ai_engine.models import AIExplanation
+        return AIExplanation.objects.filter(user=self.user, source_type="WASTE", source_id=self.pk).first()
+
+    @property
+    def is_explanation_stale(self):
+        explanation = self.ai_explanation
+        if not explanation or explanation.status != "GENERATED":
+            return False
+        from ai_engine.services.explanation_service import get_waste_deterministic_data, calculate_input_hash
+        current_data = get_waste_deterministic_data(self)
+        current_hash = calculate_input_hash(current_data)
+        return explanation.input_hash != current_hash
+
     def __str__(self) -> str:
         return f"{self.waste_type} - {self.resource_name or self.resource_id} ({self.status})"
+
