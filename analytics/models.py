@@ -104,6 +104,12 @@ class WasteFinding(models.Model):
         ("MEDIUM", "Medium"),
         ("HIGH", "High"),
     )
+    WASTE_TYPE_CHOICES = (
+        ("PERSISTENT_LOW_COST_RESOURCE", "Persistent Low-Cost Resource"),
+        ("DORMANT_COST_PATTERN", "Dormant Cost Pattern"),
+        ("STALE_RESOURCE_COST", "Stale Resource Cost"),
+        ("POSSIBLE_UNUSED_STORAGE", "Possible Unused Storage"),
+    )
     
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

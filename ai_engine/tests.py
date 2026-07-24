@@ -22,6 +22,11 @@ from ai_engine.services.explanation_service import (
     get_anomaly_deterministic_data,
     validate_grounded_response,
 )
+from django.core.exceptions import ValidationError
+from ai_engine.models import ChatSession, ChatMessage
+from ai_engine.services.chat.intent_schema import ChatQueryPlan, QueryPlanValidator, IntentEnum, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema
+from ai_engine.services.chat.query_executor import resolve_time_range, execute_query_plan
+from ai_engine.services.chat.response_builder import build_deterministic_fallback, build_grounded_response
 
 User = get_user_model()
 
@@ -337,3 +342,516 @@ class AIExplanationTestCase(TestCase):
             h1 = calculate_input_hash(data)
             h2 = calculate_input_hash(data)
             self.assertEqual(h1, h2)
+
+
+class ChatTestCase(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(username="user_chat_a", password="password123")
+        self.user_b = User.objects.create_user(username="user_chat_b", password="password123")
+
+        from billing.models import BillingUpload, BillingRecord
+        # Create billing uploads
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            original_filename="billing_a.csv",
+            upload_status="Completed"
+        )
+        self.upload_b = BillingUpload.objects.create(
+            uploaded_by=self.user_b,
+            original_filename="billing_b.csv",
+            upload_status="Completed"
+        )
+
+        # Pre-seed records for User A
+        self.record1 = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="ocid1.instance.oc1.phx.instance1",
+            resource_name="VM-Compute-1",
+            region="us-phoenix-1",
+            cost=Decimal("150.00"),
+            currency="USD",
+            usage_start=datetime.datetime(2026, 7, 10, tzinfo=datetime.timezone.utc)
+        )
+        self.record2 = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Storage",
+            resource_id="ocid1.volume.oc1.phx.volume1",
+            resource_name="Vol-Storage-1",
+            region="us-phoenix-1",
+            cost=Decimal("80.00"),
+            currency="USD",
+            usage_start=datetime.datetime(2026, 7, 12, tzinfo=datetime.timezone.utc)
+        )
+
+        # Create Anomaly for User A
+        self.anomaly = CostAnomaly.objects.create(
+            user=self.user_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=datetime.date(2026, 7, 10),
+            service_name="Compute",
+            resource_id="ocid1.instance.oc1.phx.instance1",
+            resource_name="VM-Compute-1",
+            region="us-phoenix-1",
+            actual_cost=Decimal("250.00"),
+            expected_cost=Decimal("50.00"),
+            deviation_percentage=Decimal("400.00"),
+            severity="CRITICAL",
+            status="OPEN"
+        )
+
+    def test_last_30_days_exactly_30_inclusive_dates(self):
+        # The range from start_date to end_date must cover exactly 30 calendar days.
+        start_date, end_date = resolve_time_range("LAST_30_DAYS")
+        delta = end_date - start_date
+        # 29 days offset between first and last date = 30 days inclusive
+        self.assertEqual(delta.days, 29)
+
+    def test_custom_date_validations(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        # 1. Invalid start date format
+        plan1 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.CUSTOM, start_date="2026/07/01", end_date="2026-07-15")
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan1)
+
+        # 2. Missing custom end date
+        plan2 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.CUSTOM, start_date="2026-07-01")
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan2)
+
+        # 3. start_date > end_date
+        plan3 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.CUSTOM, start_date="2026-07-20", end_date="2026-07-10")
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan3)
+
+    def test_limit_boundaries(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        # limit = 0 (invalid)
+        plan1 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.LAST_30_DAYS),
+            limit=0
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan1)
+
+        # limit = 21 (invalid)
+        plan2 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.LAST_30_DAYS),
+            limit=21
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan2)
+
+        # negative limit (invalid)
+        plan3 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.LAST_30_DAYS),
+            limit=-5
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan3)
+
+    def test_unsupported_intent_filter_combination(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema, IntentEnum
+        # TOTAL_COST cannot have anomaly_severity filter
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.LAST_30_DAYS),
+            filters=QueryFiltersSchema(anomaly_severity="HIGH")
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan)
+
+    def test_blank_currency_normalized(self):
+        from billing.models import BillingRecord
+        # Create a record with empty/blank currency
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Database",
+            resource_id="db1",
+            cost=Decimal("90.00"),
+            currency="",
+            usage_start=datetime.datetime(2026, 7, 10, tzinfo=datetime.timezone.utc)
+        )
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        data = execute_query_plan(self.user_a, plan)
+        results = data["results"]
+        # Find item with normalized currency
+        normalized_item = next((r for r in results if r["currency"] == "UNKNOWN"), None)
+        self.assertIsNotNone(normalized_item)
+        self.assertEqual(normalized_item["total_cost"], "90.00")
+
+    def test_multiple_currencies_kept_separate(self):
+        from billing.models import BillingRecord
+        # Create EUR record
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Database",
+            resource_id="db2",
+            cost=Decimal("50.00"),
+            currency="EUR",
+            usage_start=datetime.datetime(2026, 7, 10, tzinfo=datetime.timezone.utc)
+        )
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        data = execute_query_plan(self.user_a, plan)
+        results = data["results"]
+        self.assertEqual(len(results), 2)  # USD and EUR separate
+
+    def test_decimal_precision(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        data = execute_query_plan(self.user_a, plan)
+        results = data["results"]
+        usd_cost = next((r["total_cost"] for r in results if r["currency"] == "USD"), None)
+        # Should be exact quantized string '230.00' (150.00 + 80.00)
+        self.assertEqual(usd_cost, "230.00")
+
+    def test_previous_cost_zero(self):
+        # Tests comparison calculation when previous spend was zero
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        # Use THIS_MONTH (which resolves MTD).
+        # We will seed records in this month but zero in previous equivalent period.
+        plan = ChatQueryPlan(
+            intent=IntentEnum.COST_INCREASE_EXPLANATION,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.THIS_MONTH)
+        )
+        # Verify previous totals are 0.00
+        res = execute_query_plan(self.user_a, plan)
+        usd_comparison = next((c for c in res["currency_comparisons"] if c["currency"] == "USD"), None)
+        self.assertIsNotNone(usd_comparison)
+        # Since no record exists in previous period, percentage_change should be None, reason: NO_PREVIOUS_SPEND
+        self.assertIsNone(usd_comparison["percentage_change"])
+        self.assertEqual(usd_comparison["percentage_change_reason"], "NO_PREVIOUS_SPEND")
+
+    def test_session_ownership_and_isolation(self):
+        session = ChatSession.objects.create(user=self.user_a, title="User A Session")
+        
+        # User B attempts to access User A's session -> view yields 404
+        client = Client()
+        client.login(username="user_chat_b", password="password123")
+        
+        url = reverse("ai_engine:chat-session", kwargs={"session_id": session.pk})
+        response = client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+        # POST Send triggers 404 for User B
+        send_url = reverse("ai_engine:chat-send", kwargs={"session_id": session.pk})
+        response_post = client.post(send_url, {"message": "hello"})
+        self.assertEqual(response_post.status_code, 404)
+
+    def test_follow_up_requery_billing_changes(self):
+        # Prove that execution always fetches live data from the database
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        
+        # First execution total USD should be 230.00
+        data1 = execute_query_plan(self.user_a, plan)
+        total1 = next((r["total_cost"] for r in data1["results"] if r["currency"] == "USD"), None)
+        self.assertEqual(total1, "230.00")
+        
+        # Modify database values (add another billing record)
+        from billing.models import BillingRecord
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="ocid1.instance.oc1.phx.instance1",
+            cost=Decimal("100.00"),
+            currency="USD",
+            usage_start=datetime.datetime(2026, 7, 15, tzinfo=datetime.timezone.utc)
+        )
+        
+        # Re-running query executor should reflect new live totals (330.00)
+        data2 = execute_query_plan(self.user_a, plan)
+        total2 = next((r["total_cost"] for r in data2["results"] if r["currency"] == "USD"), None)
+        self.assertEqual(total2, "330.00")
+
+    @patch("ai_engine.services.chat.response_builder.GeminiProvider")
+    def test_grounding_failure_triggers_fallback(self, MockGeminiProvider):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        mock_provider = MagicMock()
+        # Gemini returns ungrounded amount '999.00' not present in data
+        mock_provider.generate_explanation.return_value = {
+            "answer_text": "Your total cost was 999.00 USD.",
+            "referenced_financial_facts": [
+                {"label": "total cost", "value": "999.00", "currency": "USD"}
+            ],
+            "referenced_severities": [],
+            "referenced_confidences": []
+        }
+        MockGeminiProvider.return_value = mock_provider
+
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        context = execute_query_plan(self.user_a, plan)
+        # Generate grounded response
+        resp = build_grounded_response("Show my total cost", plan, context)
+        # Should discard Gemini ungrounded response and trigger deterministic fallback
+        self.assertIn("Your total cost was", resp)
+        self.assertIn("230.00 USD", resp)
+        self.assertNotIn("999.00", resp)
+
+    @patch("ai_engine.services.chat.response_builder.GeminiProvider")
+    def test_provider_errors_trigger_fallback(self, MockGeminiProvider):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, IntentEnum
+        mock_provider = MagicMock()
+        # Gemini raises timeout error
+        mock_provider.generate_explanation.side_effect = LLMTimeoutError("Timeout")
+        MockGeminiProvider.return_value = mock_provider
+
+        plan = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        context = execute_query_plan(self.user_a, plan)
+        resp = build_grounded_response("Show my total cost", plan, context)
+        # Verify fallback formatter completes execution successfully
+        self.assertIn("Your total cost was", resp)
+        self.assertIn("230.00 USD", resp)
+
+    def test_potential_savings_status_filtering(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema, IntentEnum
+        from analytics.models import WasteFinding
+        # Clear existing waste findings for user A
+        WasteFinding.objects.filter(user=self.user_a).delete()
+        
+        # Seed Waste Findings
+        WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="POSSIBLE_UNUSED_STORAGE",
+            resource_key="key-1",
+            service_name="Block Storage",
+            estimated_monthly_savings=Decimal("150.00"),
+            currency="USD",
+            confidence="HIGH",
+            status="OPEN",
+            first_seen=datetime.date(2026, 7, 1),
+            last_seen=datetime.date(2026, 7, 24),
+            observation_days=24,
+            calendar_span_days=24,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("150.00"),
+            average_daily_cost=Decimal("5.0"),
+            estimated_monthly_cost=Decimal("150.00"),
+            evidence="Evidence open"
+        )
+        WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="POSSIBLE_UNUSED_STORAGE",
+            resource_key="key-2",
+            service_name="Block Storage",
+            estimated_monthly_savings=Decimal("50.00"),
+            currency="USD",
+            confidence="HIGH",
+            status="REVIEWED",
+            first_seen=datetime.date(2026, 7, 1),
+            last_seen=datetime.date(2026, 7, 24),
+            observation_days=24,
+            calendar_span_days=24,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("50.00"),
+            average_daily_cost=Decimal("2.0"),
+            estimated_monthly_cost=Decimal("50.00"),
+            evidence="Evidence reviewed"
+        )
+        WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="POSSIBLE_UNUSED_STORAGE",
+            resource_key="key-3",
+            service_name="Block Storage",
+            estimated_monthly_savings=Decimal("75.00"),
+            currency="USD",
+            confidence="HIGH",
+            status="DISMISSED",
+            first_seen=datetime.date(2026, 7, 1),
+            last_seen=datetime.date(2026, 7, 24),
+            observation_days=24,
+            calendar_span_days=24,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("75.00"),
+            average_daily_cost=Decimal("3.0"),
+            estimated_monthly_cost=Decimal("75.00"),
+            evidence="Evidence dismissed"
+        )
+
+        # 1. Default (no status filter) -> should default to OPEN only (150.00 savings)
+        plan1 = ChatQueryPlan(
+            intent=IntentEnum.POTENTIAL_SAVINGS,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+        )
+        res1 = execute_query_plan(self.user_a, plan1)
+        savings1 = next((r["estimated_monthly_savings"] for r in res1["results"] if r["currency"] == "USD"), "0.00")
+        self.assertEqual(savings1, "150.00")
+
+        # 2. Filter status="REVIEWED" -> should return REVIEWED only (50.00 savings)
+        plan2 = ChatQueryPlan(
+            intent=IntentEnum.POTENTIAL_SAVINGS,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            filters=QueryFiltersSchema(waste_status="REVIEWED")
+        )
+        # Validate to normalize status case
+        QueryPlanValidator.validate(plan2)
+        res2 = execute_query_plan(self.user_a, plan2)
+        savings2 = next((r["estimated_monthly_savings"] for r in res2["results"] if r["currency"] == "USD"), "0.00")
+        self.assertEqual(savings2, "50.00")
+
+        # 3. Filter status="DISMISSED" -> should return DISMISSED only (75.00 savings)
+        plan3 = ChatQueryPlan(
+            intent=IntentEnum.POTENTIAL_SAVINGS,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            filters=QueryFiltersSchema(waste_status="DISMISSED")
+        )
+        QueryPlanValidator.validate(plan3)
+        res3 = execute_query_plan(self.user_a, plan3)
+        savings3 = next((r["estimated_monthly_savings"] for r in res3["results"] if r["currency"] == "USD"), "0.00")
+        self.assertEqual(savings3, "75.00")
+
+    def test_comparison_services_validation(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema, IntentEnum
+        # 1. TOTAL_COST + comparison_services -> reject
+        plan1 = ChatQueryPlan(
+            intent=IntentEnum.TOTAL_COST,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=["Compute", "Database"]
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan1)
+
+        # 2. COST_COMPARISON + 1 comparison service -> reject
+        plan2 = ChatQueryPlan(
+            intent=IntentEnum.COST_COMPARISON,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=["Compute"]
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan2)
+
+        # 3. COST_COMPARISON + 11 services -> reject
+        plan3 = ChatQueryPlan(
+            intent=IntentEnum.COST_COMPARISON,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=[f"Svc{i}" for i in range(11)]
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan3)
+
+        # 4. COST_COMPARISON + blank service -> reject
+        plan4 = ChatQueryPlan(
+            intent=IntentEnum.COST_COMPARISON,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=["Compute", "   "]
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan4)
+
+        # 5. COST_COMPARISON + duplicate services -> normalize
+        plan5 = ChatQueryPlan(
+            intent=IntentEnum.COST_COMPARISON,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=["Compute", "Database", "Compute", "  Database  "]
+        )
+        QueryPlanValidator.validate(plan5)
+        # Should normalize duplicates and trim whitespace
+        self.assertEqual(plan5.comparison_services, ["Compute", "Database"])
+
+        # 6. Valid 2-service comparison -> accepted
+        plan6 = ChatQueryPlan(
+            intent=IntentEnum.COST_COMPARISON,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            comparison_services=["Compute", "Storage"]
+        )
+        QueryPlanValidator.validate(plan6)
+        self.assertEqual(plan6.comparison_services, ["Compute", "Storage"])
+
+    def test_query_executor_failure_vs_empty_data(self):
+        from ai_engine.services.chat.chat_service import send_chat_message
+        # 1. Legitimate successful empty query (e.g. no records for a service)
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema, IntentEnum
+        # Delete billing records
+        from billing.models import BillingRecord
+        BillingRecord.objects.all().delete()
+        
+        session = ChatSession.objects.create(user=self.user_a, title="Empty Data Session")
+        
+        # Patch query planner to return TOTAL_COST
+        with patch("ai_engine.services.chat.chat_service.plan_chat_query") as mock_plan, \
+             patch("ai_engine.services.chat.chat_service.build_grounded_response") as mock_resp:
+            mock_plan.return_value = ChatQueryPlan(
+                intent=IntentEnum.TOTAL_COST,
+                time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+            )
+            mock_resp.return_value = "No spend found."
+            
+            # Send message
+            msg = send_chat_message(self.user_a, session.pk, "show my total cost")
+            # Should be successful, calling response builder
+            self.assertEqual(msg.content, "No spend found.")
+            self.assertEqual(msg.deterministic_context, {"results": []})
+            mock_resp.assert_called_once()
+
+        # 2. Query executor raises exception unexpectedly
+        with patch("ai_engine.services.chat.chat_service.plan_chat_query") as mock_plan, \
+             patch("ai_engine.services.chat.chat_service.execute_query_plan") as mock_exec, \
+             patch("ai_engine.services.chat.chat_service.build_grounded_response") as mock_resp:
+            
+            mock_plan.return_value = ChatQueryPlan(
+                intent=IntentEnum.TOTAL_COST,
+                time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME)
+            )
+            # Simulated database error
+            mock_exec.side_effect = RuntimeError("DB error")
+            
+            # Send message
+            msg2 = send_chat_message(self.user_a, session.pk, "show my total cost")
+            # Should NOT call response builder and return controlled message
+            self.assertEqual(msg2.content, "I couldn't retrieve the billing data for that request. Please try again.")
+            self.assertEqual(msg2.deterministic_context, {"error": "Chat query executor failed"})
+            mock_resp.assert_not_called()
+
+    def test_waste_type_validation(self):
+        from ai_engine.services.chat.intent_schema import ChatQueryPlan, TimeRangeSchema, TimeRangeTypeEnum, QueryFiltersSchema, IntentEnum
+        # 1. Invalid waste type -> reject
+        plan1 = ChatQueryPlan(
+            intent=IntentEnum.WASTE_FINDINGS,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            filters=QueryFiltersSchema(waste_type="PLANET_WASTE")
+        )
+        with self.assertRaises(ValidationError):
+            QueryPlanValidator.validate(plan1)
+
+        # 2. Valid waste type -> accepted and normalized to uppercase
+        plan2 = ChatQueryPlan(
+            intent=IntentEnum.WASTE_FINDINGS,
+            time_range=TimeRangeSchema(type=TimeRangeTypeEnum.ALL_TIME),
+            filters=QueryFiltersSchema(waste_type="possible_unused_storage")
+        )
+        QueryPlanValidator.validate(plan2)
+        self.assertEqual(plan2.filters.waste_type, "POSSIBLE_UNUSED_STORAGE")
+
+

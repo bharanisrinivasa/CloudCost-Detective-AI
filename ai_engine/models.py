@@ -73,3 +73,51 @@ class AIExplanation(models.Model):
     def __str__(self) -> str:
         return f"AIExplanation for {self.source_type} #{self.source_id} ({self.status})"
 
+
+class ChatSession(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_sessions"
+    )
+    title = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["user", "updated_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.user.username})"
+
+
+class ChatMessage(models.Model):
+    ROLE_CHOICES = (
+        ("USER", "User"),
+        ("ASSISTANT", "Assistant"),
+    )
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="messages"
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField()
+    intent = models.CharField(max_length=50, blank=True, default="")
+    query_plan = models.JSONField(blank=True, null=True)
+    deterministic_context = models.JSONField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["session", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.role} in {self.session.title}: {self.content[:30]}"
+
+

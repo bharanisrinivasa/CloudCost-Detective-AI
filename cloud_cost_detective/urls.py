@@ -29,6 +29,7 @@ urlpatterns = [
     path("dashboard/", include("dashboard.urls")),
     path("analytics/", include("analytics.urls")),
     path("ai-engine/", include("ai_engine.urls")),
+    path("ai/", include("ai_engine.urls")),
     path("api/", include("api.urls")),
 ]
 

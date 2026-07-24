@@ -189,12 +189,7 @@ class WasteListView(LoginRequiredMixin, View):
             
         context = {
             'findings': queryset,
-            'waste_type_choices': [
-                ('PERSISTENT_LOW_COST_RESOURCE', 'Persistent Low-Cost Resource'),
-                ('DORMANT_COST_PATTERN', 'Dormant Cost Pattern'),
-                ('STALE_RESOURCE_COST', 'Stale Resource Cost'),
-                ('POSSIBLE_UNUSED_STORAGE', 'Possible Unused Storage'),
-            ],
+            'waste_type_choices': WasteFinding.WASTE_TYPE_CHOICES,
             'confidence_choices': WasteFinding.CONFIDENCE_CHOICES,
             'status_choices': WasteFinding.STATUS_CHOICES,
             'available_services': distinct_services,

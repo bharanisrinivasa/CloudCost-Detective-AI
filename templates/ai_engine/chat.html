@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}FinOps Cost Chat - CloudCost Detective AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Chat Page Specific CSS */
+    .chat-container {
+        height: calc(100vh - 120px);
+        min-height: 500px;
+    }
+
+    .chat-sidebar {
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .session-list {
+        overflow-y: auto;
+        flex-grow: 1;
+    }
+
+    .session-item {
+        border-radius: 10px;
+        transition: var(--transition-smooth);
+        border: 1px solid transparent;
+    }
+
+    .session-item:hover, .session-item.active {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--border-color);
+    }
+
+    .chat-main {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .chat-feed {
+        overflow-y: auto;
+        flex-grow: 1;
+        padding-bottom: 20px;
+    }
+
+    .chat-bubble {
+        max-width: 75%;
+        padding: 12px 18px;
+        border-radius: 16px;
+        margin-bottom: 15px;
+        position: relative;
+        animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+
+    .chat-bubble.user {
+        background: var(--primary-glow);
+        color: #ffffff;
+        align-self: flex-end;
+        border-bottom-right-radius: 4px;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.2);
+    }
+
+    .chat-bubble.assistant {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        align-self: flex-start;
+        border-top-left-radius: 4px;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+    }
+
+    .suggested-card {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 15px;
+        cursor: pointer;
+        transition: var(--transition-smooth);
+    }
+
+    .suggested-card:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: #6366f1;
+        transform: translateY(-2px);
+    }
+
+    .audit-details {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        padding: 10px;
+        margin-top: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+        width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-2">
+    <div class="row chat-container glass-card overflow-hidden">
+        
+        <!-- Sidebar Column -->
+        <div class="col-md-3 chat-sidebar p-3">
+            <div class="d-grid mb-3">
+                <form action="{% url 'ai_engine:chat-new' %}" method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary-glow w-100">
+                        <i class="fa-solid fa-plus me-2"></i>New Chat
+                    </button>
+                </form>
+            </div>
+            
+            <h6 class="text-secondary px-2 mb-2 text-uppercase font-monospace" style="font-size: 0.75rem; letter-spacing: 1px;">Recent Chats</h6>
+            <div class="session-list pe-1">
+                {% if sessions %}
+                    {% for session in sessions %}
+                        <div class="d-flex align-items-center justify-content-between p-2 mb-1 session-item {% if active_session and active_session.pk == session.pk %}active{% endif %}">
+                            <a href="{% url 'ai_engine:chat-session' session.pk %}" class="text-decoration-none text-truncate flex-grow-1 me-2 style-text" style="color: {% if active_session and active_session.pk == session.pk %}var(--text-primary){% else %}var(--text-secondary){% endif %}; font-weight: 500;">
+                                <i class="fa-regular fa-comment me-2 text-info"></i>{{ session.title }}
+                            </a>
+                            <form action="{% url 'ai_engine:chat-delete' session.pk %}" method="post" onsubmit="return confirm('Are you sure you want to delete this chat?');" class="m-0">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-link text-danger p-0 border-0" title="Delete Chat">
+                                    <i class="fa-regular fa-trash-can"></i>
+                                </button>
+                            </form>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-secondary py-4 small">
+                        <i class="fa-regular fa-comments d-block mb-2 fs-4"></i>
+                        No conversations yet.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Chat Feed Column -->
+        <div class="col-md-9 chat-main p-3">
+            {% if active_session %}
+                <!-- Messages Feed -->
+                <div class="chat-feed d-flex flex-column" id="chatFeed">
+                    {% if messages_list %}
+                        {% for msg in messages_list %}
+                            {% if msg.role == "USER" %}
+                                <div class="chat-bubble user">
+                                    {{ msg.content }}
+                                </div>
+                            {% else %}
+                                <div class="chat-bubble assistant">
+                                    <div class="message-text" style="white-space: pre-wrap;">{{ msg.content }}</div>
+                                    
+                                    <!-- Collapsible Audit Metadata -->
+                                    {% if msg.query_plan %}
+                                        <div class="mt-2">
+                                            <button class="btn btn-link btn-sm p-0 text-info text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#audit-{{ msg.pk }}" aria-expanded="false" style="font-size: 0.75rem;">
+                                                <i class="fa-solid fa-bug me-1"></i>Audit Query Details
+                                            </button>
+                                            <div class="collapse mt-1" id="audit-{{ msg.pk }}">
+                                                <div class="audit-details">
+                                                    <strong>Intent:</strong> {{ msg.intent }}<br>
+                                                    <strong>Query Plan:</strong>
+                                                    <pre class="m-0 text-info font-monospace" style="font-size: 0.7rem; overflow-x: auto;">{{ msg.query_plan|json_script:"plan-data" }}<script>document.write(JSON.stringify(JSON.parse(document.currentScript.previousElementSibling.textContent), null, 2));</script></pre>
+                                                    {% if msg.deterministic_context %}
+                                                        <strong class="mt-1 d-block">ORM Context:</strong>
+                                                        <pre class="m-0 text-success font-monospace" style="font-size: 0.7rem; overflow-x: auto;">{{ msg.deterministic_context|json_script:"context-data" }}<script>document.write(JSON.stringify(JSON.parse(document.currentScript.previousElementSibling.textContent), null, 2));</script></pre>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <!-- Suggested / Quick Questions -->
+                        <div class="my-auto py-5 text-center px-4">
+                            <h3 class="fw-bold mb-2">CloudCost Assistant</h3>
+                            <p class="text-secondary mb-4">Ask questions about your OCI billing data, resource waste findings, and anomalies.</p>
+                            
+                            <div class="row g-3 justify-content-center">
+                                <div class="col-md-6">
+                                    <div class="suggested-card text-start" onclick="submitSuggested('Why did my bill increase?')">
+                                        <div class="fw-semibold text-info"><i class="fa-solid fa-chart-line me-2"></i>Cost Increases</div>
+                                        <div class="small text-secondary mt-1">Why did my bill increase?</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="suggested-card text-start" onclick="submitSuggested('Which service costs the most?')">
+                                        <div class="fw-semibold text-info"><i class="fa-solid fa-server me-2"></i>Top Services</div>
+                                        <div class="small text-secondary mt-1">Which service costs the most?</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="suggested-card text-start" onclick="submitSuggested('Show my top 5 expensive resources.')">
+                                        <div class="fw-semibold text-info"><i class="fa-solid fa-circle-nodes me-2"></i>Resource Costs</div>
+                                        <div class="small text-secondary mt-1">Show my top 5 expensive resources.</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="suggested-card text-start" onclick="submitSuggested('Show my critical anomalies.')">
+                                        <div class="fw-semibold text-info"><i class="fa-solid fa-circle-exclamation me-2"></i>Anomalies</div>
+                                        <div class="small text-secondary mt-1">Show my critical anomalies.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- Input Box -->
+                <form id="chatForm" action="{% url 'ai_engine:chat-send' active_session.pk %}" method="post" class="mt-auto border-top pt-3 border-secondary">
+                    {% csrf_token %}
+                    <div class="input-group">
+                        <input type="text" id="chatInput" name="message" class="form-control" placeholder="Ask about your OCI billing costs..." required autocomplete="off" maxlength="1000">
+                        <button type="submit" class="btn btn-primary-glow" id="sendBtn">
+                            <span id="btnText"><i class="fa-regular fa-paper-plane me-1"></i>Send</span>
+                            <span id="btnSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                        </button>
+                    </div>
+                </form>
+            {% else %}
+                <!-- Empty Welcome Screen -->
+                <div class="my-auto py-5 text-center">
+                    <i class="fa-solid fa-magnifying-glass-dollar text-info mb-4" style="font-size: 4rem;"></i>
+                    <h2 class="fw-bold">Welcome to OCI Cost Detective Chat!</h2>
+                    <p class="text-secondary col-md-8 mx-auto mt-2">
+                        Get instant, explainable, and 100% grounded answers about your cloud billing trends, potential waste, and resource utilization.
+                    </p>
+                    <form action="{% url 'ai_engine:chat-new' %}" method="post" class="mt-4">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary-glow px-4">
+                            <i class="fa-solid fa-comments me-2"></i>Start a New Chat
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Auto-scroll chat feed to the bottom
+    function scrollFeed() {
+        const feed = document.getElementById('chatFeed');
+        if (feed) {
+            feed.scrollTop = feed.scrollHeight;
+        }
+    }
+
+    // Submit suggested question
+    function submitSuggested(text) {
+        const input = document.getElementById('chatInput');
+        const form = document.getElementById('chatForm');
+        if (input && form) {
+            input.value = text;
+            form.submit();
+            showLoading();
+        }
+    }
+
+    // Show loading spinner
+    function showLoading() {
+        const sendBtn = document.getElementById('sendBtn');
+        const btnText = document.getElementById('btnText');
+        const btnSpinner = document.getElementById('btnSpinner');
+        const chatInput = document.getElementById('chatInput');
+
+        if (sendBtn && btnText && btnSpinner) {
+            sendBtn.disabled = true;
+            btnText.classList.add('d-none');
+            btnSpinner.classList.remove('d-none');
+        }
+        if (chatInput) {
+            chatInput.readOnly = true;
+        }
+    }
+
+    // Event listener for form submission
+    const chatForm = document.getElementById('chatForm');
+    if (chatForm) {
+        chatForm.addEventListener('submit', function() {
+            showLoading();
+        });
+    }
+
+    // Initialize scrolling
+    window.addEventListener('DOMContentLoaded', function() {
+        scrollFeed();
+        const input = document.getElementById('chatInput');
+        if (input) {
+            input.focus();
+        }
+    });
+</script>
+{% endblock %}
