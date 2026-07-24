@@ -1,0 +1,272 @@
+{% extends 'base.html' %}
+
+{% block title %}Recommendation Details - CloudCost Detective AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.05) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 2rem;
+    }
+    .authoritative-section {
+        border-left: 4px solid var(--accent-color);
+        background: rgba(56, 189, 248, 0.02);
+        border-radius: 4px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    .ai-section {
+        border-left: 4px solid #a78bfa;
+        background: rgba(167, 139, 250, 0.02);
+        border-radius: 4px;
+        padding: 1.5rem;
+    }
+    .badge-status {
+        padding: 0.35rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid;
+    }
+    .status-open {
+        background: rgba(56, 189, 248, 0.1);
+        border-color: rgba(56, 189, 248, 0.3);
+        color: #38bdf8;
+    }
+    .status-reviewed {
+        background: rgba(251, 146, 60, 0.1);
+        border-color: rgba(251, 146, 60, 0.3);
+        color: #fb923c;
+    }
+    .status-accepted {
+        background: rgba(74, 222, 128, 0.1);
+        border-color: rgba(74, 222, 128, 0.3);
+        color: #4ade80;
+    }
+    .status-dismissed {
+        background: rgba(156, 163, 175, 0.1);
+        border-color: rgba(156, 163, 175, 0.3);
+        color: #9ca3af;
+    }
+    .priority-critical { color: #f87171; font-weight: bold; }
+    .priority-high { color: #fb923c; font-weight: bold; }
+    .priority-medium { color: #fde047; }
+    .priority-low { color: #9ca3af; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Breadcrumb & Back Action -->
+    <div class="mb-4">
+        <a href="{% url 'recommendation-list' %}" class="text-secondary text-decoration-none">
+            <i class="fa-solid fa-arrow-left me-2"></i>Back to Recommendations
+        </a>
+    </div>
+
+    <!-- Header Section -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-secondary text-sm d-block">{{ recommendation.get_recommendation_type_display }}</span>
+            <h1 class="fw-bold mt-1 mb-0">Optimization Analysis Details</h1>
+        </div>
+        <div class="mt-3 mt-md-0 d-flex align-items-center gap-3">
+            <span class="badge-status status-{{ recommendation.status|lower }} fs-6">
+                {{ recommendation.get_status_display }}
+            </span>
+            <!-- Status Update Controls -->
+            <form method="POST" action="{% url 'recommendation-update-status' recommendation.id %}" class="d-flex gap-2">
+                {% csrf_token %}
+                <select name="status" class="form-select form-select-sm filter-input" onchange="this.form.submit()">
+                    <option value="">-- Transition Status --</option>
+                    {% for val, label in status_choices %}
+                    <option value="{{ val }}" {% if recommendation.status == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Content Row -->
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="detail-card glass-card shadow-lg mb-4">
+                
+                <!-- Section 1: DETERMINISTIC RECOMMENDATION (Authoritative) -->
+                <h4 class="fw-bold text-info mb-3"><i class="fa-solid fa-square-check me-2"></i>Authoritative Recommendation Details</h4>
+                <div class="authoritative-section">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <span class="text-secondary text-xs d-block">Scope</span>
+                            <span class="fw-bold text-white text-sm">{{ recommendation.get_recommendation_scope_display }}</span>
+                        </div>
+                        <div class="col-md-4">
+                            <span class="text-secondary text-xs d-block">Priority</span>
+                            <span class="fw-bold text-sm priority-{{ recommendation.priority|lower }}">{{ recommendation.get_priority_display }}</span>
+                        </div>
+                        <div class="col-md-4">
+                            <span class="text-secondary text-xs d-block">Confidence</span>
+                            <span class="fw-bold text-info text-sm">{{ recommendation.get_confidence_display }}</span>
+                        </div>
+                    </div>
+                    
+                    <hr class="border-secondary opacity-25 my-3">
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block">Current Cost</span>
+                            <span class="fw-bold text-white text-lg">
+                                {% if recommendation.current_monthly_cost is not None %}
+                                    {{ recommendation.current_monthly_cost|floatformat:2 }} <span class="fs-6 text-secondary font-normal">{{ recommendation.currency }}</span>
+                                {% else %}
+                                    <span class="text-secondary">Not Safely Determined</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block">Estimated Potential Savings</span>
+                            <span class="fw-bold text-success text-lg">
+                                {% if recommendation.estimated_monthly_savings is not None %}
+                                    {{ recommendation.estimated_monthly_savings|floatformat:2 }} <span class="fs-6 text-secondary font-normal">{{ recommendation.currency }}</span>
+                                {% else %}
+                                    <span class="text-secondary">Not Safely Determined</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+
+                    <hr class="border-secondary opacity-25 my-3">
+
+                    <div class="mb-3">
+                        <span class="text-secondary text-xs d-block">Recommended Action (Deterministic)</span>
+                        <p class="text-white mb-0 text-sm fw-medium">{{ recommendation.recommended_action }}</p>
+                    </div>
+
+                    <div class="mb-3">
+                        <span class="text-secondary text-xs d-block">Limitations & Wording disclaimer</span>
+                        <p class="text-secondary mb-0 text-sm">{{ recommendation.limitations }}</p>
+                    </div>
+
+                    <div class="mb-0">
+                        <span class="text-secondary text-xs d-block">Deterministic cost/evidence summary</span>
+                        <pre class="bg-dark p-3 rounded text-white text-xs mt-1 mb-0 border border-secondary border-opacity-25" style="white-space: pre-wrap;">{{ recommendation.evidence }}</pre>
+                    </div>
+                </div>
+
+                <!-- Section 2: AI EXPLANATION (Paraphrased / Structured Explainable AI) -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="fw-bold text-purple mb-0" style="color: #a78bfa;"><i class="fa-solid fa-wand-magic-sparkles me-2"></i>Explainable AI Explanation</h4>
+                    <form method="POST" action="{% url 'recommendation-detail' recommendation.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="regenerate" value="true">
+                        <button type="submit" class="btn btn-secondary-custom btn-sm py-1.5 px-3" style="border-color: rgba(167, 139, 250, 0.3); color: #a78bfa;">
+                            <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Regenerate AI
+                        </button>
+                    </form>
+                </div>
+                
+                <div class="ai-section">
+                    {% if recommendation.ai_explanation_json %}
+                        <div class="mb-3">
+                            <span class="text-secondary text-xs d-block">AI Cost Summary</span>
+                            <p class="text-white text-sm mb-0">{{ recommendation.ai_explanation_json.summary }}</p>
+                        </div>
+                        <div class="mb-3">
+                            <span class="text-secondary text-xs d-block">Why Flagged</span>
+                            <p class="text-white text-sm mb-0">{{ recommendation.ai_explanation_json.why_flagged }}</p>
+                        </div>
+                        <div class="mb-3">
+                            <span class="text-secondary text-xs d-block">Financial Impact Description</span>
+                            <p class="text-white text-sm mb-0">{{ recommendation.ai_explanation_json.financial_impact }}</p>
+                        </div>
+                        <div class="mb-3">
+                            <span class="text-secondary text-xs d-block">AI Confidence Justification</span>
+                            <p class="text-white text-sm mb-0">{{ recommendation.ai_explanation_json.confidence_explanation }}</p>
+                        </div>
+                        <div class="mb-3">
+                            <span class="text-secondary text-xs d-block">Recommended Next Investigation Steps</span>
+                            <p class="text-white text-sm mb-0">{{ recommendation.ai_explanation_json.recommended_next_step }}</p>
+                        </div>
+                        <div class="mb-0">
+                            <span class="text-secondary text-xs d-block">Heuristic Limitations & Disclaimer</span>
+                            <p class="text-secondary text-sm mb-0">{{ recommendation.ai_explanation_json.limitations }}</p>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4 text-secondary">
+                            <i class="fa-solid fa-robot d-block mb-3 fs-2 opacity-50"></i>
+                            <span>No AI explanation cache is generated yet. Click "Regenerate AI" to query Gemini.</span>
+                        </div>
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Sidebar / Source Linkage -->
+        <div class="col-lg-4">
+            <div class="detail-card glass-card shadow-lg mb-4">
+                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-link text-info me-2"></i>Deterministic Source Traceability</h5>
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Source Reference</span>
+                    <span class="fw-semibold text-white text-sm">
+                        {% if recommendation.source_type == "WASTE_FINDING" %}
+                            Waste Finding #{{ recommendation.source_id }}
+                        {% elif recommendation.source_type == "COST_ANOMALY" %}
+                            Cost Anomaly #{{ recommendation.source_id }}
+                        {% else %}
+                            Billing Pattern
+                        {% endif %}
+                    </span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Service Classification</span>
+                    <span class="badge bg-secondary text-uppercase text-xs">{{ recommendation.service_name }}</span>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-secondary text-xs d-block">Region</span>
+                    <span class="fw-semibold text-white text-sm">{{ recommendation.region }}</span>
+                </div>
+
+                <!-- Linked Object Info -->
+                {% if source_object %}
+                    <hr class="border-secondary opacity-25">
+                    <div class="mb-3">
+                        <span class="text-secondary text-xs d-block">Linked Finding Details</span>
+                        {% if recommendation.source_type == "WASTE_FINDING" %}
+                            <p class="text-white text-sm mb-2">Type: {{ source_object.get_waste_type_display }}</p>
+                            <a href="{% url 'waste-detail' source_object.id %}" class="btn btn-secondary-custom btn-sm w-100 py-2">
+                                <i class="fa-solid fa-eye me-1"></i>View Source Waste Finding
+                            </a>
+                        {% elif recommendation.source_type == "COST_ANOMALY" %}
+                            <p class="text-white text-sm mb-2">Type: {{ source_object.get_anomaly_type_display }}</p>
+                            <a href="{% url 'anomaly-detail' source_object.id %}" class="btn btn-secondary-custom btn-sm w-100 py-2">
+                                <i class="fa-solid fa-eye me-1"></i>View Source Cost Anomaly
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                <!-- Resource Identity Section -->
+                {% if recommendation.recommendation_scope == "RESOURCE" %}
+                    <hr class="border-secondary opacity-25">
+                    <div class="mb-0">
+                        <span class="text-secondary text-xs d-block">Resource Identity Scope</span>
+                        <div class="mt-2">
+                            <span class="text-secondary text-xs d-block">Identity Type</span>
+                            <span class="fw-semibold text-white text-sm">{{ recommendation.identity_type|upper }}</span>
+                        </div>
+                        <div class="mt-2">
+                            <span class="text-secondary text-xs d-block">Identity Value</span>
+                            <code class="text-info text-xs d-block text-truncate" style="background: rgba(0,0,0,0.2); padding: 0.35rem; border-radius: 4px;">{{ recommendation.identity_value }}</code>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

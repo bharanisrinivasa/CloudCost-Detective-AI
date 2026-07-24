@@ -310,3 +310,98 @@ def get_or_generate_explanation(user, source, force_regenerate: bool = False) ->
         raise LLMProviderError("AI explanation generation is temporarily unavailable.")
 
     return explanation_record
+
+
+def get_or_generate_recommendation_explanation(user, rec, force_regenerate: bool = False) -> dict:
+    """
+    Coordinates explanation generation for recommendations.
+    Uses structured responses from the Gemini API and caching mechanisms.
+    """
+    from analytics.services.recommendation_engine import generate_explanation_hash
+    current_hash = generate_explanation_hash(rec)
+    
+    if rec.ai_explanation_json and rec.ai_explanation_hash == current_hash and not force_regenerate:
+        logger.info("Using cached valid explanation for Recommendation ID %s", rec.pk)
+        return rec.ai_explanation_json
+
+    # Prepare serialized data for Gemini
+    rec_data = {
+        "recommendation_type": rec.recommendation_type,
+        "recommendation_scope": rec.recommendation_scope,
+        "resource_id": rec.resource_id or "",
+        "resource_name": rec.resource_name or "",
+        "identity_type": rec.identity_type,
+        "identity_value": rec.identity_value,
+        "service_name": rec.service_name,
+        "region": rec.region,
+        "current_monthly_cost": str(rec.current_monthly_cost) if rec.current_monthly_cost is not None else None,
+        "estimated_monthly_savings": str(rec.estimated_monthly_savings) if rec.estimated_monthly_savings is not None else None,
+        "currency": rec.currency,
+        "confidence": rec.confidence,
+        "priority": rec.priority,
+        "evidence": rec.evidence or "",
+        "recommended_action": rec.recommended_action or "",
+        "limitations": rec.limitations or "",
+    }
+    
+    system_prompt = build_system_prompt()
+    user_prompt = build_user_prompt("RECOMMENDATION", rec_data)
+    
+    try:
+        provider = GeminiProvider()
+        response_dict = provider.generate_explanation(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_schema=AIExplanationResponseSchema
+        )
+        
+        validated_schema = AIExplanationResponseSchema(**response_dict)
+        validated_dict = validated_schema.model_dump()
+        
+        # Grounding check: verify that costs and savings are not contradicted in text near keywords
+        corpus = " ".join([
+            validated_dict["summary"],
+            validated_dict["why_flagged"],
+            " ".join(validated_dict["evidence"]),
+            validated_dict["financial_impact"],
+            validated_dict["confidence_explanation"],
+            validated_dict["recommended_next_step"],
+            validated_dict["limitations"]
+        ]).lower()
+        
+        # Check cost
+        if rec.current_monthly_cost is not None:
+            cost_val = Decimal(rec.current_monthly_cost)
+            for num in extract_number_near_keyword(corpus, "cost") or extract_number_near_keyword(corpus, "monthly"):
+                if num != cost_val:
+                    if rec.estimated_monthly_savings is not None and num == Decimal(rec.estimated_monthly_savings):
+                        continue
+                    raise LLMInvalidResponseError("INVALID_RESPONSE")
+                    
+        # Check savings
+        if rec.estimated_monthly_savings is not None:
+            savings_val = Decimal(rec.estimated_monthly_savings)
+            for num in extract_number_near_keyword(corpus, "save") or extract_number_near_keyword(corpus, "savings"):
+                if num != savings_val:
+                    if rec.current_monthly_cost is not None and num == Decimal(rec.current_monthly_cost):
+                        continue
+                    raise LLMInvalidResponseError("INVALID_RESPONSE")
+        
+        # Cache successful explanation
+        rec.ai_explanation_json = validated_dict
+        rec.ai_explanation_hash = current_hash
+        rec.save()
+        return validated_dict
+
+    except LLMMissingAPIKeyError as e:
+        raise e
+    except LLMTimeoutError as e:
+        raise e
+    except LLMRateLimitError as e:
+        raise e
+    except LLMInvalidResponseError:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in recommendation explanation generation service: %s", type(e).__name__)
+        raise LLMProviderError("AI explanation generation is temporarily unavailable.")
+

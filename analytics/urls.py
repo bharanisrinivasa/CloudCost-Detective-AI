@@ -12,4 +12,10 @@ urlpatterns = [
     path("waste/<int:pk>/", views.WasteDetailView.as_view(), name="waste-detail"),
     path("waste/trigger/", views.TriggerWasteDetectionView.as_view(), name="waste-trigger"),
     path("waste/<int:pk>/status/", views.UpdateWasteStatusView.as_view(), name="waste-update-status"),
+    
+    # Recommendation Routes
+    path("recommendations/", views.RecommendationListView.as_view(), name="recommendation-list"),
+    path("recommendations/<int:pk>/", views.RecommendationDetailView.as_view(), name="recommendation-detail"),
+    path("recommendations/trigger/", views.TriggerRecommendationsView.as_view(), name="recommendation-trigger"),
+    path("recommendations/<int:pk>/status/", views.UpdateRecommendationStatusView.as_view(), name="recommendation-update-status"),
 ]

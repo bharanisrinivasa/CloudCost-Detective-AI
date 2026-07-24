@@ -3,13 +3,98 @@ from django.conf import settings
 
 
 class Recommendation(models.Model):
-    title = models.CharField(max_length=200)
-    reason = models.TextField()
+    RECOMMENDATION_TYPE_CHOICES = (
+        ("RIGHTSIZE_REVIEW", "Rightsizing Review"),
+        ("RESERVED_CAPACITY_REVIEW", "Reserved Capacity Review"),
+        ("STORAGE_OPTIMIZATION", "Storage Optimization"),
+        ("BACKUP_POLICY_REVIEW", "Backup Policy Review"),
+        ("COST_PATTERN_REVIEW", "Cost Pattern Review"),
+    )
+    STATUS_CHOICES = (
+        ("OPEN", "Open"),
+        ("REVIEWED", "Reviewed"),
+        ("ACCEPTED", "Accepted"),
+        ("DISMISSED", "Dismissed"),
+    )
+    CONFIDENCE_CHOICES = (
+        ("LOW", "Low"),
+        ("MEDIUM", "Medium"),
+        ("HIGH", "High"),
+    )
+    PRIORITY_CHOICES = (
+        ("LOW", "Low"),
+        ("MEDIUM", "Medium"),
+        ("HIGH", "High"),
+        ("CRITICAL", "Critical"),
+    )
+    SOURCE_TYPE_CHOICES = (
+        ("WASTE_FINDING", "Waste Finding"),
+        ("COST_ANOMALY", "Cost Anomaly"),
+        ("BILLING_PATTERN", "Billing Pattern"),
+    )
+    SAVINGS_SOURCE_CHOICES = (
+        ("WASTE_FINDING", "Waste Finding"),
+        ("DETERMINISTIC_RULE", "Deterministic Rule"),
+        ("NONE", "None"),
+    )
+    SCOPE_CHOICES = (
+        ("RESOURCE", "Resource"),
+        ("SERVICE_REGION", "Service/Region"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="recommendations"
+    )
+    recommendation_type = models.CharField(max_length=50, choices=RECOMMENDATION_TYPE_CHOICES)
+    recommendation_scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default="RESOURCE")
+    
+    # Resource identity
+    resource_id = models.CharField(max_length=500, blank=True, default="")
+    resource_name = models.CharField(max_length=255, blank=True, default="")
+    identity_type = models.CharField(max_length=20, default="unknown")  # "id", "name", "unknown"
+    identity_value = models.CharField(max_length=500, blank=True, default="")
+    
+    service_name = models.CharField(max_length=200, blank=True, default="")
+    region = models.CharField(max_length=200, blank=True, default="")
+    
+    # Traceability
+    source_type = models.CharField(max_length=50, choices=SOURCE_TYPE_CHOICES)
+    source_id = models.PositiveIntegerField(null=True, blank=True)
+    
+    # Financial fields
+    current_monthly_cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    estimated_monthly_savings = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=10, default="USD")
+    savings_source = models.CharField(max_length=50, choices=SAVINGS_SOURCE_CHOICES, default="NONE")
+    
+    # Metadata
+    confidence = models.CharField(max_length=20, choices=CONFIDENCE_CHOICES, default="LOW")
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="LOW")
+    
     evidence = models.TextField(blank=True, default="")
-    confidence = models.FloatField(default=0.0)
-    estimated_savings = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    risk_level = models.CharField(max_length=20, default="medium")
-    created_at = models.DateTimeField(auto_now_add=True)
+    recommended_action = models.TextField(blank=True, default="")
+    limitations = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="OPEN")
+    
+    # Idempotency fingerprint
+    fingerprint = models.CharField(max_length=64, unique=True)
+    
+    # Gemini Explanation Cache
+    ai_explanation_json = models.JSONField(blank=True, null=True)
+    ai_explanation_hash = models.CharField(max_length=64, blank=True, default="")
+    
+    detected_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["user", "priority"]),
+            models.Index(fields=["user", "recommendation_type"]),
+        ]
+
 
 
 class AIExplanation(models.Model):

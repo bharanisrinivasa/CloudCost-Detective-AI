@@ -40,6 +40,29 @@ def dashboard_home(request):
     context['potential_waste_savings'] = ", ".join(savings_parts) if savings_parts else "0.00 USD"
     context['waste_has_multiple_currencies'] = len(savings_by_currency) > 1
     
+    # Import and aggregate Module 9 recommendation KPI counters scoped to request.user
+    from ai_engine.models import Recommendation
+    open_recs = Recommendation.objects.filter(user=request.user, status="OPEN")
+    context['open_recommendations_count'] = open_recs.count()
+    context['high_priority_recommendations_count'] = open_recs.filter(priority__in=["HIGH", "CRITICAL"]).count()
+    
+    rec_savings = {}
+    seen_waste_ids = set()
+    for rec in open_recs:
+        if rec.estimated_monthly_savings is None:
+            continue
+        curr = rec.currency or "USD"
+        if rec.savings_source == "WASTE_FINDING" and rec.source_id is not None:
+            if rec.source_id in seen_waste_ids:
+                continue
+            seen_waste_ids.add(rec.source_id)
+        if curr not in rec_savings:
+            rec_savings[curr] = Decimal("0.00")
+        rec_savings[curr] += rec.estimated_monthly_savings
+
+    rec_savings_parts = [f"{val:.2f} {cur}" for cur, val in rec_savings.items()]
+    context['potential_recommendation_savings'] = ", ".join(rec_savings_parts) if rec_savings_parts else "0.00 USD"
+    
     return render(request, "dashboard/home.html", context)
 
 

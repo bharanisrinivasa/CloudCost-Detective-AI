@@ -264,3 +264,171 @@ class UpdateWasteStatusView(LoginRequiredMixin, View):
             messages.error(request, "Invalid status state transition.")
             
         return redirect(reverse('waste-detail', kwargs={'pk': pk}))
+
+
+class RecommendationListView(LoginRequiredMixin, View):
+    template_name = "analytics/recommendation_list.html"
+
+    def get(self, request, *args, **kwargs):
+        from ai_engine.models import Recommendation
+        user = request.user
+        queryset = Recommendation.objects.filter(user=user).order_by('-detected_at')
+
+        # Get filter params
+        rec_type = request.GET.get("recommendation_type", "")
+        priority = request.GET.get("priority", "")
+        confidence = request.GET.get("confidence", "")
+        status = request.GET.get("status", "")
+        service = request.GET.get("service", "")
+        region = request.GET.get("region", "")
+
+        if rec_type:
+            queryset = queryset.filter(recommendation_type=rec_type)
+        if priority:
+            queryset = queryset.filter(priority=priority)
+        if confidence:
+            queryset = queryset.filter(confidence=confidence)
+        if status:
+            queryset = queryset.filter(status=status)
+        if service:
+            queryset = queryset.filter(service_name__iexact=service)
+        if region:
+            queryset = queryset.filter(region__iexact=region)
+
+        # Retrieve summary metrics for all open user recommendations (unfiltered)
+        open_recs = Recommendation.objects.filter(user=user, status="OPEN")
+        open_count = open_recs.count()
+        high_priority_count = open_recs.filter(priority__in=["HIGH", "CRITICAL"]).count()
+
+        # Deduplicate potential savings by currency
+        from decimal import Decimal
+        savings_map = {}
+        seen_waste_ids = set()
+        for rec in open_recs:
+            if rec.estimated_monthly_savings is None:
+                continue
+            curr = rec.currency or "USD"
+            if rec.savings_source == "WASTE_FINDING" and rec.source_id is not None:
+                if rec.source_id in seen_waste_ids:
+                    continue
+                seen_waste_ids.add(rec.source_id)
+            if curr not in savings_map:
+                savings_map[curr] = Decimal("0.00")
+            savings_map[curr] += rec.estimated_monthly_savings
+
+        savings_parts = [f"{val:.2f} {cur}" for cur, val in savings_map.items()]
+        potential_savings_display = ", ".join(savings_parts) if savings_parts else "0.00 USD"
+
+        context = {
+            "recommendations": queryset,
+            "rec_type_choices": Recommendation.RECOMMENDATION_TYPE_CHOICES,
+            "priority_choices": Recommendation.PRIORITY_CHOICES,
+            "confidence_choices": Recommendation.CONFIDENCE_CHOICES,
+            "status_choices": Recommendation.STATUS_CHOICES,
+            "open_count": open_count,
+            "high_priority_count": high_priority_count,
+            "potential_savings_display": potential_savings_display,
+            "active_filters": {
+                "recommendation_type": rec_type,
+                "priority": priority,
+                "confidence": confidence,
+                "status": status,
+                "service": service,
+                "region": region,
+            }
+        }
+        return render(request, self.template_name, context)
+
+
+class RecommendationDetailView(LoginRequiredMixin, View):
+    template_name = "analytics/recommendation_detail.html"
+
+    def get(self, request, pk, *args, **kwargs):
+        from ai_engine.models import Recommendation
+        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+
+        # Resolve deterministic source object securely (user-scoped)
+        source_obj = None
+        if rec.source_type == "WASTE_FINDING" and rec.source_id is not None:
+            source_obj = WasteFinding.objects.filter(pk=rec.source_id, user=request.user).first()
+        elif rec.source_type == "COST_ANOMALY" and rec.source_id is not None:
+            source_obj = CostAnomaly.objects.filter(pk=rec.source_id, user=request.user).first()
+
+        context = {
+            "recommendation": rec,
+            "source_object": source_obj,
+            "status_choices": Recommendation.STATUS_CHOICES,
+        }
+        return render(request, self.template_name, context)
+
+    def post(self, request, pk, *args, **kwargs):
+        """POST view to trigger AI Explanation generation on-demand."""
+        from ai_engine.models import Recommendation
+        from ai_engine.services.explanation_service import get_or_generate_recommendation_explanation
+        from ai_engine.services.provider import (
+            LLMMissingAPIKeyError,
+            LLMTimeoutError,
+            LLMRateLimitError,
+            LLMInvalidResponseError,
+            LLMException,
+        )
+
+        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+        force_regenerate = request.POST.get("regenerate", "false").lower() == "true"
+
+        try:
+            get_or_generate_recommendation_explanation(
+                user=request.user,
+                rec=rec,
+                force_regenerate=force_regenerate
+            )
+            messages.success(request, "AI explanation generated successfully.")
+        except LLMMissingAPIKeyError:
+            messages.error(request, "AI service is not configured.")
+        except LLMTimeoutError:
+            messages.error(request, "AI explanation generation timed out. Please try again.")
+        except LLMRateLimitError:
+            messages.error(request, "AI explanation service is temporarily busy. Please try again later.")
+        except LLMInvalidResponseError:
+            messages.error(request, "The AI provider returned an invalid explanation.")
+        except (LLMException, Exception):
+            messages.error(request, "AI explanation generation is temporarily unavailable.")
+
+        return redirect(reverse("recommendation-detail", kwargs={"pk": pk}))
+
+
+class TriggerRecommendationsView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        import time
+        start_time = time.time()
+        
+        count = run_recommendation_engine(request.user)
+        duration = time.time() - start_time
+        
+        messages.success(
+            request,
+            f"Recommendation analysis complete. "
+            f"Active recommendations updated/created: {count}. "
+            f"Execution time: {duration:.2f} seconds."
+        )
+        return redirect(reverse("recommendation-list"))
+
+
+class UpdateRecommendationStatusView(LoginRequiredMixin, View):
+    def post(self, request, pk, *args, **kwargs):
+        from ai_engine.models import Recommendation
+        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+        
+        new_status = request.POST.get("status", "").upper()
+        valid_statuses = [choice[0] for choice in Recommendation.STATUS_CHOICES]
+        
+        if new_status in valid_statuses:
+            rec.status = new_status
+            rec.save()
+            messages.success(request, f"Recommendation status updated to {rec.get_status_display()}.")
+        else:
+            messages.error(request, "Invalid status state transition.")
+            
+        return redirect(reverse("recommendation-detail", kwargs={"pk": pk}))
+

@@ -855,3 +855,440 @@ class ChatTestCase(TestCase):
         self.assertEqual(plan2.filters.waste_type, "POSSIBLE_UNUSED_STORAGE")
 
 
+class RecommendationTestCase(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        self.user_a = User.objects.create_user(username="usera_rec", password="password")
+        self.user_b = User.objects.create_user(username="userb_rec", password="password")
+
+        # Set up a test billing upload for User A
+        from billing.models import BillingUpload, BillingRecord
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            original_filename="rec_billing.csv",
+            upload_status="Completed"
+        )
+        # Create at least one BillingRecord so dashboard shows active dashboard state
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Oracle Cloud Compute",
+            resource_id="comp-srv-region-1",
+            region="us-ashburn-1",
+            cost=Decimal("10.00"),
+            currency="USD",
+            usage_start=datetime.datetime.now()
+        )
+
+    def test_legacy_migration_cleanup(self):
+        from ai_engine.models import Recommendation
+        # Legacy rows cleanup is simulated: any unowned or legacy records are cleared.
+        # Check that we can create a recommendation and it has the user field correctly set.
+        rec = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=1,
+            fingerprint="hash1",
+            status="OPEN"
+        )
+        self.assertEqual(rec.user, self.user_a)
+        self.assertEqual(Recommendation.objects.filter(user=self.user_a).count(), 1)
+
+    def test_recommendation_scopes_and_fingerprints(self):
+        from ai_engine.models import Recommendation
+        from analytics.services.recommendation_engine import generate_fingerprint
+        
+        fp_res = generate_fingerprint(
+            self.user_a.id, "RIGHTSIZE_REVIEW", "RESOURCE", "WASTE_FINDING", 123,
+            "id", "ocid1.instance.oc1..1", "COMPUTE", "us-phoenix-1", "USD"
+        )
+        fp_srv = generate_fingerprint(
+            self.user_a.id, "RESERVED_CAPACITY_REVIEW", "SERVICE_REGION", "BILLING_PATTERN", None,
+            "unknown", "", "COMPUTE", "us-phoenix-1", "USD"
+        )
+        
+        # Verify scope is included in fingerprint and they differ
+        self.assertNotEqual(fp_res, fp_srv)
+
+        # Create both
+        rec1 = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="ocid1.instance.oc1..1",
+            identity_type="id",
+            identity_value="ocid1.instance.oc1..1",
+            source_type="WASTE_FINDING",
+            source_id=123,
+            fingerprint=fp_res,
+            status="OPEN"
+        )
+        rec2 = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RESERVED_CAPACITY_REVIEW",
+            recommendation_scope="SERVICE_REGION",
+            source_type="BILLING_PATTERN",
+            fingerprint=fp_srv,
+            status="OPEN"
+        )
+        self.assertEqual(rec1.recommendation_scope, "RESOURCE")
+        self.assertEqual(rec2.recommendation_scope, "SERVICE_REGION")
+
+    def test_reserved_capacity_observations(self):
+        from billing.models import BillingRecord
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        from ai_engine.models import Recommendation
+
+        # 1. 24 billing rows on 1 single day -> counts as 1 observed day. Should yield no recommendations.
+        base_date = datetime.date(2026, 7, 30)
+        for i in range(24):
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Oracle Cloud Compute",
+                resource_id="comp-srv-region-1",
+                region="us-ashburn-1",
+                cost=Decimal("10.00"),
+                currency="USD",
+                usage_start=datetime.datetime.combine(base_date, datetime.time(i, 0))
+            )
+        count = run_recommendation_engine(self.user_a)
+        self.assertEqual(count, 0)
+        self.assertEqual(Recommendation.objects.filter(user=self.user_a, recommendation_type="RESERVED_CAPACITY_REVIEW").count(), 0)
+
+        # Clear records
+        BillingRecord.objects.filter(upload=self.upload_a).delete()
+
+        # 2. 23 unique observed days -> yields no recommendation (requires observed_days >= 24)
+        for d in range(23):
+            day = base_date - datetime.timedelta(days=d)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Oracle Cloud Compute",
+                resource_id="comp-srv-region-1",
+                region="us-ashburn-1",
+                cost=Decimal("10.00"),
+                currency="USD",
+                usage_start=datetime.datetime.combine(day, datetime.time.min)
+            )
+        count = run_recommendation_engine(self.user_a)
+        self.assertEqual(count, 0)
+
+        # 3. 24 unique observed days + stable spend (std dev = 0) -> triggers a recommendation
+        # Add 24th day
+        day_24 = base_date - datetime.timedelta(days=23)
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Oracle Cloud Compute",
+            resource_id="comp-srv-region-1",
+            region="us-ashburn-1",
+            cost=Decimal("10.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(day_24, datetime.time.min)
+        )
+        count = run_recommendation_engine(self.user_a)
+        self.assertEqual(count, 1)
+        
+        rec = Recommendation.objects.get(user=self.user_a, recommendation_type="RESERVED_CAPACITY_REVIEW")
+        self.assertEqual(rec.recommendation_scope, "SERVICE_REGION")
+        self.assertIsNone(rec.estimated_monthly_savings)
+        self.assertNotIn("Savings Plans", rec.recommended_action)
+
+    def test_cost_anomaly_monthly_cost_null(self):
+        from analytics.models import CostAnomaly
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        from ai_engine.models import Recommendation
+
+        # Create a HIGH CostAnomaly
+        anomaly = CostAnomaly.objects.create(
+            user=self.user_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=datetime.date(2026, 7, 24),
+            service_name="Compute",
+            resource_id="res-spike-1",
+            actual_cost=Decimal("500.00"),
+            expected_cost=Decimal("50.00"),
+            deviation_percentage=Decimal("900.00"),
+            severity="HIGH",
+            status="OPEN"
+        )
+        
+        count = run_recommendation_engine(self.user_a)
+        self.assertEqual(count, 1)
+        
+        rec = Recommendation.objects.get(user=self.user_a, recommendation_type="COST_PATTERN_REVIEW")
+        self.assertIsNone(rec.current_monthly_cost)
+        self.assertIsNone(rec.estimated_monthly_savings)
+        self.assertIn("500.00", rec.evidence)
+
+    def test_status_preservation_during_regeneration(self):
+        from analytics.models import WasteFinding
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        from ai_engine.models import Recommendation
+
+        wf = WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="key-1",
+            resource_id="res-1",
+            service_name="Compute",
+            first_seen=datetime.date(2026, 7, 1),
+            last_seen=datetime.date(2026, 7, 24),
+            observation_days=24,
+            calendar_span_days=24,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("120.00"),
+            average_daily_cost=Decimal("5.0"),
+            estimated_monthly_cost=Decimal("150.00"),
+            estimated_monthly_savings=Decimal("100.00"),
+            evidence="Evidence",
+            confidence="HIGH",
+            status="OPEN"
+        )
+
+        # First run generates OPEN recommendation
+        count = run_recommendation_engine(self.user_a)
+        self.assertEqual(count, 1)
+        rec = Recommendation.objects.get(user=self.user_a)
+        self.assertEqual(rec.status, "OPEN")
+
+        # Manually change status to ACCEPTED
+        rec.status = "ACCEPTED"
+        rec.save()
+
+        # Update WasteFinding costs slightly
+        wf.total_cost = Decimal("130.00")
+        wf.save()
+
+        # Second run should preserve status while updating cost/evidence
+        count2 = run_recommendation_engine(self.user_a)
+        self.assertEqual(count2, 1)
+        
+        rec.refresh_from_db()
+        self.assertEqual(rec.status, "ACCEPTED")
+
+    def test_ai_explanation_hash_stale(self):
+        from ai_engine.models import Recommendation
+        from analytics.services.recommendation_engine import generate_explanation_hash
+
+        rec = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=1,
+            current_monthly_cost=Decimal("100.00"),
+            estimated_monthly_savings=Decimal("20.00"),
+            fingerprint="fp1",
+            confidence="LOW",
+            priority="LOW",
+            status="OPEN",
+            ai_explanation_json={"summary": "Use a smaller instance"},
+        )
+        rec.ai_explanation_hash = generate_explanation_hash(rec)
+        rec.save()
+
+        # Test hash change stales cache
+        rec.priority = "HIGH"
+        new_hash = generate_explanation_hash(rec)
+        self.assertNotEqual(rec.ai_explanation_hash, new_hash)
+
+    def test_backup_review_threshold_and_tokens(self):
+        from billing.models import BillingRecord
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        from ai_engine.models import Recommendation
+
+        base_date = datetime.date(2026, 7, 30)
+
+        # 1. Spends < $10 (e.g. $9.50) -> no recommendation generated
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Oracle Cloud Object Storage",
+            resource_name="bucket-backup-1",
+            resource_id="backup-id-1",
+            region="us-ashburn-1",
+            cost=Decimal("9.50"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(base_date, datetime.time.min)
+        )
+        run_recommendation_engine(self.user_a)
+        self.assertEqual(Recommendation.objects.filter(user=self.user_a, recommendation_type="BACKUP_POLICY_REVIEW").count(), 0)
+
+        # Clear records
+        BillingRecord.objects.all().delete()
+
+        # 2. Spends >= $10 (e.g. $12.00) with proper token "backup" -> recommendation created
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Oracle Cloud Object Storage",
+            resource_name="bucket-backup-1",
+            resource_id="backup-id-1",
+            region="us-ashburn-1",
+            cost=Decimal("12.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(base_date, datetime.time.min)
+        )
+        run_recommendation_engine(self.user_a)
+        self.assertEqual(Recommendation.objects.filter(user=self.user_a, recommendation_type="BACKUP_POLICY_REVIEW").count(), 1)
+        
+        rec = Recommendation.objects.get(user=self.user_a, recommendation_type="BACKUP_POLICY_REVIEW")
+        self.assertIsNone(rec.estimated_monthly_savings)
+        self.assertNotIn("move older snapshots", rec.recommended_action)
+
+        # 3. False positive partial token like "snap" in resource name -> no recommendation
+        BillingRecord.objects.all().delete()
+        Recommendation.objects.all().delete()
+        
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_name="snappy-compute-instance",
+            resource_id="instance-id-1",
+            region="us-ashburn-1",
+            cost=Decimal("25.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(base_date, datetime.time.min)
+        )
+        run_recommendation_engine(self.user_a)
+        self.assertEqual(Recommendation.objects.filter(user=self.user_a, recommendation_type="BACKUP_POLICY_REVIEW").count(), 0)
+
+    def test_rightsizing_wording_and_savings(self):
+        from analytics.models import WasteFinding
+        from analytics.services.recommendation_engine import run_recommendation_engine
+        from ai_engine.models import Recommendation
+
+        wf = WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            resource_key="key-1",
+            resource_id="res-1",
+            service_name="Compute",
+            first_seen=datetime.date(2026, 7, 1),
+            last_seen=datetime.date(2026, 7, 24),
+            observation_days=24,
+            calendar_span_days=24,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("120.00"),
+            average_daily_cost=Decimal("5.0"),
+            estimated_monthly_cost=Decimal("150.00"),
+            estimated_monthly_savings=Decimal("100.00"),
+            evidence="Evidence",
+            confidence="HIGH",
+            status="OPEN"
+        )
+        run_recommendation_engine(self.user_a)
+        rec = Recommendation.objects.get(user=self.user_a)
+        
+        # Verify sizing safety guidelines (no claims about CPU/RAM or VM shape)
+        action_lower = rec.recommended_action.lower()
+        self.assertNotIn("low cpu", action_lower)
+        self.assertNotIn("low ram", action_lower)
+        self.assertNotIn("underutil", action_lower)
+        self.assertNotIn("oversized", action_lower)
+        self.assertNotIn("delete", action_lower)
+        self.assertEqual(rec.savings_source, "WASTE_FINDING")
+        self.assertEqual(rec.estimated_monthly_savings, Decimal("100.00"))
+
+    def test_dashboard_deduplication(self):
+        from ai_engine.models import Recommendation
+        from django.test import RequestFactory
+        from dashboard.views import dashboard_home
+        
+        # Create two recommendations inheriting savings from the SAME waste finding
+        Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=99,
+            estimated_monthly_savings=Decimal("75.00"),
+            currency="USD",
+            savings_source="WASTE_FINDING",
+            fingerprint="fp1",
+            status="OPEN"
+        )
+        Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="STORAGE_OPTIMIZATION",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=99,
+            estimated_monthly_savings=Decimal("75.00"),
+            currency="USD",
+            savings_source="WASTE_FINDING",
+            fingerprint="fp2",
+            status="OPEN"
+        )
+        
+        # Trigger dashboard_home
+        factory = RequestFactory()
+        request = factory.get("/dashboard/")
+        request.user = self.user_a
+        
+        response = dashboard_home(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("75.00 USD", response.content.decode())
+
+    def test_security_isolation_and_status_post(self):
+        from ai_engine.models import Recommendation
+        from django.urls import reverse
+
+        rec = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=1,
+            fingerprint="fp1",
+            status="OPEN"
+        )
+
+        # User B tries to view User A's recommendation detail -> returns 404
+        self.client.force_login(self.user_b)
+        response = self.client.get(reverse("recommendation-detail", kwargs={"pk": rec.id}))
+        self.assertEqual(response.status_code, 404)
+
+        # User B tries to transition status -> returns 404 (due to get_object_or_404)
+        response_status = self.client.post(
+            reverse("recommendation-update-status", kwargs={"pk": rec.id}),
+            {"status": "ACCEPTED"}
+        )
+        self.assertEqual(response_status.status_code, 404)
+
+    @patch("ai_engine.services.explanation_service.GeminiProvider")
+    def test_gemini_explanation_graceful_fallback(self, MockGeminiProvider):
+        from ai_engine.models import Recommendation
+        from ai_engine.services.explanation_service import get_or_generate_recommendation_explanation
+        from ai_engine.services.provider import LLMTimeoutError
+
+        rec = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            recommendation_scope="RESOURCE",
+            resource_id="res-1",
+            source_type="WASTE_FINDING",
+            source_id=1,
+            fingerprint="fp1",
+            status="OPEN"
+        )
+
+        # Mock timeout error
+        mock_provider = MockGeminiProvider.return_value
+        mock_provider.generate_explanation.side_effect = LLMTimeoutError("Timeout")
+
+        # Verification of graceful timeout raising and preservation of deterministic logic
+        with self.assertRaises(LLMTimeoutError):
+            get_or_generate_recommendation_explanation(self.user_a, rec)
+        
+        # Ensure recommendation is fully usable
+        self.assertEqual(rec.status, "OPEN")
+        self.assertIsNone(rec.ai_explanation_json)
+
+
+

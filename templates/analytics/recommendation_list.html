@@ -1,0 +1,283 @@
+{% extends 'base.html' %}
+
+{% block title %}Rightsizing Recommendations - CloudCost Detective AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filter-input {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-primary) !important;
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        transition: var(--transition-smooth);
+    }
+    .filter-input:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--accent-color);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    .filter-input option {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    .kpi-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.05) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 1.5rem;
+        transition: var(--transition-smooth);
+    }
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(56, 189, 248, 0.25);
+    }
+    .table-custom {
+        background: transparent !important;
+    }
+    .table-custom th {
+        border-bottom: 2px solid rgba(255, 255, 255, 0.1) !important;
+        color: var(--text-secondary) !important;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.5px;
+    }
+    .table-custom td {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+        color: var(--text-primary) !important;
+        vertical-align: middle;
+        padding: 1rem 0.75rem;
+    }
+    .priority-critical { color: #f87171; font-weight: bold; }
+    .priority-high { color: #fb923c; font-weight: bold; }
+    .priority-medium { color: #fde047; }
+    .priority-low { color: #9ca3af; }
+    
+    .badge-status {
+        padding: 0.35rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid;
+    }
+    .status-open {
+        background: rgba(56, 189, 248, 0.1);
+        border-color: rgba(56, 189, 248, 0.3);
+        color: #38bdf8;
+    }
+    .status-reviewed {
+        background: rgba(251, 146, 60, 0.1);
+        border-color: rgba(251, 146, 60, 0.3);
+        color: #fb923c;
+    }
+    .status-accepted {
+        background: rgba(74, 222, 128, 0.1);
+        border-color: rgba(74, 222, 128, 0.3);
+        color: #4ade80;
+    }
+    .status-dismissed {
+        background: rgba(156, 163, 175, 0.1);
+        border-color: rgba(156, 163, 175, 0.3);
+        color: #9ca3af;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">FinOps Recommendations</span>
+            <h1 class="fw-bold mt-1 mb-0">Rightsizing & Commitments Advice</h1>
+        </div>
+        <div class="mt-3 mt-md-0 d-flex gap-2">
+            <form method="POST" action="{% url 'recommendation-trigger' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary-glow px-4 py-2.5">
+                    <i class="fa-solid fa-rotate me-2"></i>Run Recommendation Analysis
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row g-4 mb-4">
+        <!-- Open Recommendations -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Open Recommendations</span>
+                    <h2 class="fw-extrabold text-info m-0">{{ open_count }}</h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs">
+                    <span>Pending review and action guidance</span>
+                </div>
+            </div>
+        </div>
+        <!-- High Priority Recommendations -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">High/Critical Priority</span>
+                    <h2 class="fw-extrabold text-warning m-0">{{ high_priority_count }}</h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs">
+                    <span>Requiring primary attention</span>
+                </div>
+            </div>
+        </div>
+        <!-- Estimated Potential Savings -->
+        <div class="col-md-4">
+            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="text-secondary text-sm d-block mb-1">Total Potential Savings</span>
+                    <h2 class="fw-extrabold text-success m-0">{{ potential_savings_display }}</h2>
+                </div>
+                <div class="mt-3 text-secondary text-xs">
+                    <span>Deduplicated waste savings included</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card glass-card p-4 mb-4">
+        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-sliders text-info me-2"></i>Filter recommendations</h5>
+        <form method="GET" action="{% url 'recommendation-list' %}" class="row g-3">
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Type</label>
+                <select name="recommendation_type" class="form-select filter-input">
+                    <option value="">All Types</option>
+                    {% for val, label in rec_type_choices %}
+                    <option value="{{ val }}" {% if active_filters.recommendation_type == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Priority</label>
+                <select name="priority" class="form-select filter-input">
+                    <option value="">All Priorities</option>
+                    {% for val, label in priority_choices %}
+                    <option value="{{ val }}" {% if active_filters.priority == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Confidence</label>
+                <select name="confidence" class="form-select filter-input">
+                    <option value="">All Confidences</option>
+                    {% for val, label in confidence_choices %}
+                    <option value="{{ val }}" {% if active_filters.confidence == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Status</label>
+                <select name="status" class="form-select filter-input">
+                    <option value="">All Statuses</option>
+                    {% for val, label in status_choices %}
+                    <option value="{{ val }}" {% if active_filters.status == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary text-sm">Service</label>
+                <input type="text" name="service" class="form-control filter-input" placeholder="e.g. Compute" value="{{ active_filters.service }}">
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary-glow w-100 py-2.5">
+                    <i class="fa-solid fa-filter me-1"></i>Apply
+                </button>
+                <a href="{% url 'recommendation-list' %}" class="btn reset-btn py-2.5 px-3">
+                    <i class="fa-solid fa-rotate-left"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Recommendations Table -->
+    <div class="card glass-card p-4">
+        <div class="table-responsive">
+            <table class="table table-borderless table-custom m-0">
+                <thead>
+                    <tr>
+                        <th>Recommendation Type</th>
+                        <th>Scope</th>
+                        <th>Resource Identity / Group</th>
+                        <th>Service</th>
+                        <th>Priority</th>
+                        <th>Confidence</th>
+                        <th class="text-end">Potential Savings</th>
+                        <th class="text-center">Status</th>
+                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in recommendations %}
+                    <tr>
+                        <td>
+                            <div class="fw-bold text-white">{{ rec.get_recommendation_type_display }}</div>
+                            <span class="text-secondary text-xs">{{ rec.region }}</span>
+                        </td>
+                        <td>
+                            <span class="badge rounded bg-secondary text-uppercase text-xs" style="font-size: 0.65rem;">
+                                {{ rec.get_recommendation_scope_display }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if rec.recommendation_scope == "SERVICE_REGION" %}
+                                <span class="text-secondary italic text-sm">Service Region Aggregate</span>
+                            {% else %}
+                                {% if rec.resource_id %}
+                                    <div class="text-white text-sm text-truncate" style="max-width: 200px;" title="{{ rec.resource_id }}">{{ rec.resource_id }}</div>
+                                    {% if rec.resource_name %}
+                                        <span class="text-secondary text-xs">{{ rec.resource_name }}</span>
+                                    {% endif %}
+                                {% elif rec.resource_name %}
+                                    <div class="text-white text-sm">{{ rec.resource_name }}</div>
+                                {% else %}
+                                    <span class="text-muted italic text-sm">Unknown Identity</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td class="text-white fw-semibold">{{ rec.service_name }}</td>
+                        <td>
+                            <span class="priority-{{ rec.priority|lower }}">{{ rec.get_priority_display }}</span>
+                        </td>
+                        <td>
+                            <span class="text-info">{{ rec.get_confidence_display }}</span>
+                        </td>
+                        <td class="text-end text-success fw-bold">
+                            {% if rec.estimated_monthly_savings is not None %}
+                                {{ rec.estimated_monthly_savings|floatformat:2 }} <span class="text-white text-xs fw-normal">{{ rec.currency }}</span>
+                            {% else %}
+                                <span class="text-secondary">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <span class="badge-status status-{{ rec.status|lower }}">
+                                {{ rec.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="text-center">
+                            <a href="{% url 'recommendation-detail' rec.id %}" class="btn btn-secondary-custom btn-sm py-1.5 px-3">
+                                <i class="fa-solid fa-circle-info me-1"></i>Detail
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center text-secondary py-5">
+                            <i class="fa-solid fa-lightbulb d-block mb-3 fs-1 opacity-25"></i>
+                            No recommendations found matching active filters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
