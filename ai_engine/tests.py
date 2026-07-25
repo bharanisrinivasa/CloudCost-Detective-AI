@@ -995,6 +995,13 @@ class RecommendationTestCase(TestCase):
         self.assertEqual(rec.recommendation_scope, "SERVICE_REGION")
         self.assertIsNone(rec.estimated_monthly_savings)
         self.assertNotIn("Savings Plans", rec.recommended_action)
+        self.assertNotIn("Savings Plans", rec.limitations)
+        self.assertNotIn("1-3 years", rec.limitations)
+        self.assertNotIn("%", rec.recommended_action)
+        self.assertNotIn("%", rec.limitations)
+        self.assertNotIn("guarantee", rec.recommended_action.lower())
+        self.assertNotIn("guarantee", rec.limitations.lower())
+        self.assertNotIn("break-even", rec.recommended_action.lower())
 
     def test_cost_anomaly_monthly_cost_null(self):
         from analytics.models import CostAnomaly
@@ -1289,6 +1296,19 @@ class RecommendationTestCase(TestCase):
         # Ensure recommendation is fully usable
         self.assertEqual(rec.status, "OPEN")
         self.assertIsNone(rec.ai_explanation_json)
+
+    def test_calculate_stats_decimal_safety(self):
+        from analytics.services.recommendation_engine import calculate_stats
+        
+        # Test values as Decimal
+        decimal_list = [Decimal("10.00"), Decimal("12.50"), Decimal("9.50"), Decimal("11.00")]
+        mean, std_dev = calculate_stats(decimal_list)
+        
+        self.assertIsInstance(mean, Decimal)
+        self.assertIsInstance(std_dev, Decimal)
+        self.assertEqual(mean, Decimal("10.7500"))
+        self.assertEqual(std_dev, Decimal("1.1456"))
+
 
 
 

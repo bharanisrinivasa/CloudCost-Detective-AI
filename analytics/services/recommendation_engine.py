@@ -1,4 +1,3 @@
-import math
 import datetime
 import hashlib
 from decimal import Decimal
@@ -42,10 +41,10 @@ def generate_explanation_hash(rec) -> str:
 def calculate_stats(decimal_list):
     """Calculate mean and standard deviation safely using Decimals."""
     if not decimal_list:
-        return Decimal("0.00"), Decimal("0.00")
-    mean = sum(decimal_list) / len(decimal_list)
-    variance = sum((x - mean) ** 2 for x in decimal_list) / len(decimal_list)
-    std_dev = Decimal(str(math.sqrt(float(variance)))).quantize(Decimal("0.0001"))
+        return Decimal("0.0000"), Decimal("0.0000")
+    mean = sum(decimal_list) / Decimal(len(decimal_list))
+    variance = sum((x - mean) ** 2 for x in decimal_list) / Decimal(len(decimal_list))
+    std_dev = variance.sqrt().quantize(Decimal("0.0001"))
     mean_dec = mean.quantize(Decimal("0.0001"))
     return mean_dec, std_dev
 
@@ -243,7 +242,7 @@ def run_recommendation_engine(user):
             limitation_text = (
                 "No pricing calculations, commitment percentages, or break-even horizons "
                 "can be computed deterministically without custom contract pricing data. "
-                "Ensure that workloads are expected to remain stable for at least 1-3 years."
+                "Review expected workload longevity and applicable OCI commitment terms before making a commitment."
             )
 
             # Cumulative monthly cost in 30 days
