@@ -63,6 +63,24 @@ def dashboard_home(request):
     rec_savings_parts = [f"{val:.2f} {cur}" for cur, val in rec_savings.items()]
     context['potential_recommendation_savings'] = ", ".join(rec_savings_parts) if rec_savings_parts else "0.00 USD"
     
+    # Module 10 forecasting integration
+    from analytics.services.cost_forecaster import get_forecast_for_user
+    forecast_results = get_forecast_for_user(request.user)
+    
+    forecast_available = False
+    forecast_summaries = []
+    for curr, res in forecast_results.items():
+        if res.get("forecast_available"):
+            forecast_available = True
+            forecast_summaries.append({
+                "currency": curr,
+                "next_month_forecast": res["next_month_forecast"],
+                "confidence": res["confidence"]
+            })
+            
+    context['forecast_available'] = forecast_available
+    context['forecast_summaries'] = forecast_summaries
+    
     return render(request, "dashboard/home.html", context)
 
 

@@ -18,4 +18,7 @@ urlpatterns = [
     path("recommendations/<int:pk>/", views.RecommendationDetailView.as_view(), name="recommendation-detail"),
     path("recommendations/trigger/", views.TriggerRecommendationsView.as_view(), name="recommendation-trigger"),
     path("recommendations/<int:pk>/status/", views.UpdateRecommendationStatusView.as_view(), name="recommendation-update-status"),
+    
+    # Forecasting Routes
+    path("forecast/", views.ForecastView.as_view(), name="cost-forecast"),
 ]

@@ -1,5 +1,6 @@
 from decimal import Decimal
 import datetime
+from django.utils import timezone
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -1092,3 +1093,345 @@ class WasteDetectionTests(TestCase):
         self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-unsupported-unit", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
         self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-inconsistent-units", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
         self.assertFalse(WasteFinding.objects.filter(resource_key="id:ocid-storage-volatile-cost", waste_type="POSSIBLE_UNUSED_STORAGE").exists())
+
+
+class ForecastingTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(username="forecastera", email="fa@example.com", password="password123")
+        self.user_b = User.objects.create_user(username="forecasterb", email="fb@example.com", password="password123")
+        
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            upload_type="Billing Report",
+            original_filename="user_a_forecast.csv"
+        )
+        self.upload_b = BillingUpload.objects.create(
+            uploaded_by=self.user_b,
+            upload_type="Billing Report",
+            original_filename="user_b_forecast.csv"
+        )
+        
+        self.today = timezone.localdate()
+        self.current_month_index = self.today.year * 12 + self.today.month
+
+    def _create_record(self, user, upload, months_offset, cost, currency="USD"):
+        # offset is relative to current_month_index
+        target_index = self.current_month_index + months_offset
+        yr = (target_index - 1) // 12
+        mn = (target_index - 1) % 12 + 1
+        
+        # Use middle day of month for safety
+        dt = datetime.datetime(yr, mn, 15, 12, 0, tzinfo=datetime.timezone.utc)
+        
+        BillingRecord.objects.create(
+            upload=upload,
+            service="Compute",
+            resource_id="ocid-vm-forecast",
+            region="us-ashburn-1",
+            cost=Decimal(str(cost)),
+            currency=currency,
+            usage_start=dt
+        )
+
+    def test_month_completeness_and_future_exclusion(self):
+        # Current month: MONTH_TO_DATE (0 offset)
+        self._create_record(self.user_a, self.upload_a, 0, 100)
+        # Previous completed month (-1 offset)
+        self._create_record(self.user_a, self.upload_a, -1, 150)
+        # Future month (+1 offset)
+        self._create_record(self.user_a, self.upload_a, 1, 200)
+        
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        
+        usd_res = res.get("USD", {})
+        self.assertTrue(usd_res.get("has_future_records"))
+        
+        # Verify current month is treated as MONTH_TO_DATE
+        mtd = usd_res.get("current_month_mtd")
+        self.assertIsNotNone(mtd)
+        self.assertEqual(mtd["cost"], Decimal("100.00"))
+        
+        # Completed months should only contain the previous month (no future, no current)
+        hist = usd_res.get("historical_months", [])
+        self.assertEqual(len(hist), 1)
+        self.assertEqual(hist[0]["cost"], Decimal("150.00"))
+
+    def test_missing_months_and_coverage(self):
+        # Create completed months: -4, -2, -1 (gap at -3)
+        self._create_record(self.user_a, self.upload_a, -4, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 120)
+        self._create_record(self.user_a, self.upload_a, -1, 130)
+        
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        usd_res = res.get("USD", {})
+        
+        # Verify indices spacing preservation
+        # Span = from index of -4 to index of -1, which is 4 months (e.g. -4, -3, -2, -1)
+        self.assertEqual(usd_res["historical_month_count"], 3)
+        self.assertEqual(usd_res["historical_span_months"], 4)
+        self.assertEqual(usd_res["missing_month_count"], 1)
+        self.assertEqual(usd_res["coverage_ratio"], Decimal("0.75"))
+        # Since coverage is 0.75 (which is >= 0.75 but < 0.90), confidence can be at most MEDIUM
+        # Since we have exactly 3 months, it must remain LOW confidence
+        self.assertEqual(usd_res["confidence"], "LOW")
+
+    def test_forecast_horizons_and_start_month(self):
+        # Create 3 completed months
+        self._create_record(self.user_a, self.upload_a, -3, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 100)
+        self._create_record(self.user_a, self.upload_a, -1, 100)
+        
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        usd_res = res.get("USD", {})
+        
+        self.assertTrue(usd_res["forecast_available"])
+        self.assertEqual(usd_res["next_month_forecast"], Decimal("100.00"))
+        self.assertEqual(usd_res["three_month_forecast"], Decimal("300.00"))
+        self.assertEqual(usd_res["six_month_forecast"], Decimal("600.00"))
+        
+        # Ensure predicted months are chronologically strictly after current month
+        forecast_months = usd_res["forecast_months"]
+        self.assertEqual(len(forecast_months), 6)
+        
+        next_month_target = self.current_month_index + 1
+        y_next = (next_month_target - 1) // 12
+        m_next = (next_month_target - 1) % 12 + 1
+        self.assertEqual(forecast_months[0]["month"], f"{y_next:04d}-{m_next:02d}")
+
+    def test_regression_trends(self):
+        # 1. Increasing trend
+        # x = 0 (100), x = 1 (110), x = 2 (120) -> slope is 10
+        self._create_record(self.user_a, self.upload_a, -3, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 110)
+        self._create_record(self.user_a, self.upload_a, -1, 120)
+        
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        usd_res = res.get("USD", {})
+        
+        # June cost is 120 (relative x = 2). Current month July is offset +0 (relative x = 3).
+        # Predicted Aug (+1 offset, relative x = 4) should be: 100 + 10 * 4 = 140
+        self.assertEqual(usd_res["next_month_forecast"], Decimal("140.00"))
+        
+        # Clear records
+        BillingRecord.objects.all().delete()
+        
+        # 2. Decreasing trend with floor at zero
+        # x = 0 (100), x = 1 (50), x = 2 (10) -> slope is -45
+        # Aug (+1 offset, relative x = 4) prediction would be negative -> must be floored at 0.00
+        self._create_record(self.user_a, self.upload_a, -3, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 50)
+        self._create_record(self.user_a, self.upload_a, -1, 10)
+        
+        res = get_forecast_for_user(self.user_a)
+        usd_res = res.get("USD", {})
+        self.assertEqual(usd_res["next_month_forecast"], Decimal("0.00"))
+        self.assertEqual(usd_res["three_month_forecast"], Decimal("0.00"))
+
+    def test_confidence_mapping(self):
+        # 1. 3 completed months -> LOW
+        self._create_record(self.user_a, self.upload_a, -3, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 100)
+        self._create_record(self.user_a, self.upload_a, -1, 100)
+        
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        self.assertEqual(res["USD"]["confidence"], "LOW")
+        
+        # 2. 6 completed months, stable -> MEDIUM
+        BillingRecord.objects.all().delete()
+        for i in range(1, 7):
+            self._create_record(self.user_a, self.upload_a, -i, 100)
+        res = get_forecast_for_user(self.user_a)
+        self.assertEqual(res["USD"]["confidence"], "MEDIUM")
+        
+        # 3. 12 completed months, stable -> HIGH
+        BillingRecord.objects.all().delete()
+        for i in range(1, 13):
+            self._create_record(self.user_a, self.upload_a, -i, 100)
+        res = get_forecast_for_user(self.user_a)
+        self.assertEqual(res["USD"]["confidence"], "HIGH")
+        
+        # 4. 12 completed months but volatile -> degraded
+        BillingRecord.objects.all().delete()
+        for i in range(1, 13):
+            cost = 100 if i % 2 == 0 else 250
+            self._create_record(self.user_a, self.upload_a, -i, cost)
+        res = get_forecast_for_user(self.user_a)
+        self.assertNotEqual(res["USD"]["confidence"], "HIGH")
+
+        # 5. Flat zero history -> LOW
+        BillingRecord.objects.all().delete()
+        for i in range(1, 13):
+            self._create_record(self.user_a, self.upload_a, -i, 0)
+        res = get_forecast_for_user(self.user_a)
+        self.assertEqual(res["USD"]["confidence"], "LOW")
+
+    def test_forecast_range(self):
+        # Less than 5 months -> bounds are None
+        for i in range(1, 5):
+            self._create_record(self.user_a, self.upload_a, -i, 100)
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        self.assertIsNone(res["USD"]["forecast_months"][0]["lower_bound"])
+        self.assertIsNone(res["USD"]["forecast_months"][0]["upper_bound"])
+        
+        # 5 or more completed months -> bounds are calculated via RMSE
+        self._create_record(self.user_a, self.upload_a, -5, 120)
+        res = get_forecast_for_user(self.user_a)
+        self.assertIsNotNone(res["USD"]["forecast_months"][0]["lower_bound"])
+        self.assertIsNotNone(res["USD"]["forecast_months"][0]["upper_bound"])
+        self.assertTrue(res["USD"]["forecast_months"][0]["lower_bound"] >= Decimal("0.00"))
+
+    def test_multicurrency_isolation(self):
+        # Create 12 USD records (forecast available)
+        for i in range(1, 13):
+            self._create_record(self.user_a, self.upload_a, -i, 100, currency="USD")
+        # Create 2 EUR records (forecast unavailable)
+        for i in range(1, 3):
+            self._create_record(self.user_a, self.upload_a, -i, 50, currency="EUR")
+            
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res = get_forecast_for_user(self.user_a)
+        
+        self.assertTrue(res["USD"]["forecast_available"])
+        self.assertFalse(res["EUR"]["forecast_available"])
+
+    def test_security_user_isolation_and_login(self):
+        # Create records for User B
+        for i in range(1, 5):
+            self._create_record(self.user_b, self.upload_b, -i, 100)
+            
+        # Run forecast on User A (who has no records)
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        res_a = get_forecast_for_user(self.user_a)
+        self.assertEqual(len(res_a), 0)
+        
+        # Verify login required for view
+        url = reverse("cost-forecast")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        
+        # Log in User B and test access
+        self.client.login(username="forecasterb", password="password123")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("forecast_results", response.context)
+
+    def test_calendar_boundaries(self):
+        # Build month advance checks and leap year checks
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        
+        # Test offset boundary labels by formatting relative indexes
+        self._create_record(self.user_a, self.upload_a, -3, 100)
+        self._create_record(self.user_a, self.upload_a, -2, 100)
+        self._create_record(self.user_a, self.upload_a, -1, 100)
+        
+        res = get_forecast_for_user(self.user_a)
+        usd_res = res.get("USD", {})
+        self.assertTrue(usd_res["forecast_available"])
+        
+        # Verify year transition and months labeling formatting
+        forecast_months = usd_res["forecast_months"]
+        for fm in forecast_months:
+            m_str = fm["month"]
+            self.assertEqual(len(m_str), 7)
+            self.assertEqual(m_str[4], "-")
+            yr_part, mn_part = map(int, m_str.split("-"))
+            self.assertTrue(1 <= mn_part <= 12)
+            self.assertTrue(yr_part >= 2026)
+
+    def test_timezone_boundary_classification(self):
+        from django.utils import timezone
+        
+        # Override timezone to GMT+5:30 (e.g. Asia/Kolkata)
+        with timezone.override("Asia/Kolkata"):
+            # A naive datetime (no exception should occur)
+            naive_dt = datetime.datetime(2026, 6, 15, 12, 0)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="naive-test",
+                cost=Decimal("10.00"),
+                currency="USD",
+                usage_start=naive_dt
+            )
+            
+            # An aware datetime that is UTC: 2026-06-30 23:30:00+00:00
+            # Under Asia/Kolkata timezone: 2026-07-01 05:00:00+05:30
+            # So in local time, it belongs to July 2026.
+            aware_dt = datetime.datetime(2026, 6, 30, 23, 30, tzinfo=datetime.timezone.utc)
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service="Compute",
+                resource_id="aware-test",
+                cost=Decimal("20.00"),
+                currency="USD",
+                usage_start=aware_dt
+            )
+            
+            # Create another record to satisfy 3 months minimum in June, May, April
+            self._create_record(self.user_a, self.upload_a, -3, 100) # April
+            self._create_record(self.user_a, self.upload_a, -2, 100) # May
+            
+            from analytics.services.cost_forecaster import get_forecast_for_user
+            res = get_forecast_for_user(self.user_a)
+            usd_res = res.get("USD", {})
+            
+            # June has naive_dt (10.00) + May (-2 offset) has 100.00 + April (-3 offset) has 100.00 -> 3 completed months!
+            # June total completed cost is 10.00.
+            # July has aware_dt (20.00). July is the current month MTD.
+            # Let's verify that July MTD has 20.00 and June completed has 10.00.
+            mtd = usd_res.get("current_month_mtd")
+            self.assertIsNotNone(mtd)
+            self.assertEqual(mtd["month"], "2026-07")
+            self.assertEqual(mtd["cost"], Decimal("20.00"))
+            
+            hist = usd_res.get("historical_months", [])
+            june_hist = [h for h in hist if h["month"] == "2026-06"]
+            self.assertEqual(len(june_hist), 1)
+            self.assertEqual(june_hist[0]["cost"], Decimal("10.00"))
+
+    def test_future_only_currency_and_empty_user(self):
+        from analytics.services.cost_forecaster import get_forecast_for_user
+        
+        # E. Empty user
+        res_empty = get_forecast_for_user(self.user_a)
+        self.assertEqual(res_empty, {})
+        
+        # B. Future-only EUR record
+        self._create_record(self.user_a, self.upload_a, 2, 100, currency="EUR")
+        
+        res = get_forecast_for_user(self.user_a)
+        self.assertIn("EUR", res)
+        self.assertNotIn("UNKNOWN", res)
+        
+        eur_res = res["EUR"]
+        self.assertFalse(eur_res["forecast_available"])
+        self.assertTrue(eur_res["has_future_records"])
+        self.assertEqual(eur_res["historical_month_count"], 0)
+        self.assertEqual(len(eur_res["forecast_months"]), 0)
+        
+        # C. Future-only multi-currency
+        self._create_record(self.user_a, self.upload_a, 2, 150, currency="USD")
+        
+        res_multi = get_forecast_for_user(self.user_a)
+        self.assertIn("EUR", res_multi)
+        self.assertIn("USD", res_multi)
+        
+        self.assertFalse(res_multi["USD"]["forecast_available"])
+        self.assertTrue(res_multi["USD"]["has_future_records"])
+        self.assertEqual(res_multi["USD"]["historical_month_count"], 0)
+        
+        # D. Blank future currency -> UNKNOWN
+        self._create_record(self.user_a, self.upload_a, 2, 80, currency="")
+        
+        res_blank = get_forecast_for_user(self.user_a)
+        self.assertIn("UNKNOWN", res_blank)
+        self.assertTrue(res_blank["UNKNOWN"]["has_future_records"])
+        self.assertFalse(res_blank["UNKNOWN"]["forecast_available"])
+
+

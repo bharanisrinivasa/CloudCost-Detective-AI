@@ -432,3 +432,81 @@ class UpdateRecommendationStatusView(LoginRequiredMixin, View):
             
         return redirect(reverse("recommendation-detail", kwargs={"pk": pk}))
 
+
+class ForecastView(LoginRequiredMixin, View):
+    template_name = "analytics/forecast.html"
+
+    def get(self, request, *args, **kwargs):
+        import datetime
+        from analytics.services.cost_forecaster import get_forecast_for_user
+
+        forecast_results = get_forecast_for_user(request.user)
+
+        def format_month_label(month_str):
+            yr, mn = map(int, month_str.split('-'))
+            dt = datetime.date(yr, mn, 1)
+            return dt.strftime("%b %Y")
+
+        has_multiple_currencies = len(forecast_results) > 1
+        has_future_records_overall = any(res["has_future_records"] for res in forecast_results.values())
+
+        chart_data = {}
+        for curr, res in forecast_results.items():
+            if not res["forecast_available"]:
+                continue
+
+            labels = []
+            historical_data = []
+            forecast_data = []
+            lower_bounds = []
+            upper_bounds = []
+
+            for hm in res["historical_months"]:
+                labels.append(format_month_label(hm["month"]))
+                historical_data.append(float(hm["cost"]))
+                forecast_data.append(None)
+                lower_bounds.append(None)
+                upper_bounds.append(None)
+
+            if res["current_month_mtd"]:
+                mtd = res["current_month_mtd"]
+                labels.append(format_month_label(mtd["month"]))
+                historical_data.append(float(mtd["cost"]))
+                forecast_data.append(float(mtd["cost"]))
+                lower_bounds.append(float(mtd["cost"]))
+                upper_bounds.append(float(mtd["cost"]))
+            else:
+                if historical_data:
+                    forecast_data[-1] = historical_data[-1]
+                    if res["forecast_months"] and res["forecast_months"][0]["lower_bound"] is not None:
+                        lower_bounds[-1] = historical_data[-1]
+                        upper_bounds[-1] = historical_data[-1]
+
+            for fm in res["forecast_months"]:
+                labels.append(format_month_label(fm["month"]))
+                historical_data.append(None)
+                forecast_data.append(float(fm["predicted_cost"]))
+                if fm["lower_bound"] is not None:
+                    lower_bounds.append(float(fm["lower_bound"]))
+                    upper_bounds.append(float(fm["upper_bound"]))
+                else:
+                    lower_bounds.append(None)
+                    upper_bounds.append(None)
+
+            chart_data[curr] = {
+                "labels": labels,
+                "historical_data": historical_data,
+                "forecast_data": forecast_data,
+                "lower_bounds": lower_bounds,
+                "upper_bounds": upper_bounds
+            }
+
+        context = {
+            "forecast_results": forecast_results,
+            "chart_data": chart_data,
+            "has_multiple_currencies": has_multiple_currencies,
+            "has_future_records_overall": has_future_records_overall,
+        }
+        return render(request, self.template_name, context)
+
+
