@@ -45,6 +45,13 @@ class Recommendation(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="recommendations",
+        null=True,
+        blank=True
+    )
+    project = models.ForeignKey(
+        "accounts.Project",
+        on_delete=models.CASCADE,
         related_name="recommendations"
     )
     recommendation_type = models.CharField(max_length=50, choices=RECOMMENDATION_TYPE_CHOICES)
@@ -88,11 +95,20 @@ class Recommendation(models.Model):
     detected_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def save(self, *args, **kwargs):
+        if not hasattr(self, 'project') or self.project_id is None:
+            if self.user:
+                from accounts.models import Project
+                project = Project.objects.filter(organization__memberships__user=self.user).first()
+                if project:
+                    self.project = project
+        super().save(*args, **kwargs)
+
     class Meta:
         indexes = [
-            models.Index(fields=["user", "status"]),
-            models.Index(fields=["user", "priority"]),
-            models.Index(fields=["user", "recommendation_type"]),
+            models.Index(fields=["project", "status"]),
+            models.Index(fields=["project", "priority"]),
+            models.Index(fields=["project", "recommendation_type"]),
         ]
 
 
@@ -109,6 +125,13 @@ class AIExplanation(models.Model):
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ai_explanations",
+        null=True,
+        blank=True
+    )
+    project = models.ForeignKey(
+        "accounts.Project",
         on_delete=models.CASCADE,
         related_name="ai_explanations"
     )
@@ -135,13 +158,13 @@ class AIExplanation(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["user", "source_type", "source_id"]),
+            models.Index(fields=["project", "source_type", "source_id"]),
             models.Index(fields=["input_hash"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "source_type", "source_id"],
-                name="unique_user_source_explanation"
+                fields=["project", "source_type", "source_id"],
+                name="unique_project_source_explanation"
             )
         ]
 
@@ -158,10 +181,24 @@ class AIExplanation(models.Model):
     def __str__(self) -> str:
         return f"AIExplanation for {self.source_type} #{self.source_id} ({self.status})"
 
+    def save(self, *args, **kwargs):
+        if not hasattr(self, 'project') or self.project_id is None:
+            if self.user:
+                from accounts.models import Project
+                project = Project.objects.filter(organization__memberships__user=self.user).first()
+                if project:
+                    self.project = project
+        super().save(*args, **kwargs)
+
 
 class ChatSession(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_sessions"
+    )
+    project = models.ForeignKey(
+        "accounts.Project",
         on_delete=models.CASCADE,
         related_name="chat_sessions"
     )
@@ -172,11 +209,20 @@ class ChatSession(models.Model):
     class Meta:
         ordering = ["-updated_at"]
         indexes = [
-            models.Index(fields=["user", "updated_at"]),
+            models.Index(fields=["project", "user", "updated_at"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.title} ({self.user.username})"
+
+    def save(self, *args, **kwargs):
+        if not hasattr(self, 'project') or self.project_id is None:
+            if self.user:
+                from accounts.models import Project
+                project = Project.objects.filter(organization__memberships__user=self.user).first()
+                if project:
+                    self.project = project
+        super().save(*args, **kwargs)
 
 
 class ChatMessage(models.Model):

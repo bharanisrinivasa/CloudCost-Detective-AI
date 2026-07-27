@@ -1,0 +1,483 @@
+{% extends 'base.html' %}
+
+{% block title %}What-if Cost Simulator - CloudCost Detective AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .glass-card {
+        background: rgba(30, 41, 59, 0.4);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+    }
+    .form-control-custom {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-primary) !important;
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        transition: var(--transition-smooth);
+    }
+    .form-control-custom:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--accent-color);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    .form-control-custom option {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    .action-row {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 10px;
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+    }
+    .results-panel {
+        border-left: 4px solid var(--accent-color) !important;
+    }
+    .kpi-num {
+        font-size: 2rem;
+        font-weight: 800;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">FinOps What-If Simulator</span>
+            <h1 class="fw-bold mt-1 mb-0">What-if Cost Simulator</h1>
+        </div>
+        <div class="mt-3 mt-md-0">
+            <a href="{% url 'dashboard-home' %}" class="btn btn-secondary-custom btn-sm">
+                <i class="fa-solid fa-arrow-left me-2"></i>Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Alert Message Block -->
+    {% if messages %}
+    <div class="messages mb-4">
+        {% for msg in messages %}
+        <div class="alert {% if msg.tags == 'success' %}alert-success{% else %}alert-danger{% endif %} alert-dismissible fade show border-0 shadow-sm" role="alert" style="background: {% if msg.tags == 'success' %}rgba(34, 197, 94, 0.15){% else %}rgba(239, 68, 68, 0.15){% endif %}; color: {% if msg.tags == 'success' %}#4ade80{% else %}#f87171{% endif %}; border-left: 4px solid {% if msg.tags == 'success' %}#22c55e{% else %}#ef4444{% endif %} !important;">
+            <div class="d-flex align-items-center">
+                <i class="fa-solid {% if msg.tags == 'success' %}fa-circle-check{% else %}fa-circle-exclamation{% endif %} me-2 fs-5"></i>
+                <div>{{ msg }}</div>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Simulation Warning Disclaimer -->
+    <div class="alert alert-info border-0 shadow-sm mb-4" role="alert" style="background: rgba(14, 165, 233, 0.1); border-left: 4px solid #0ea5e9 !important; color: #38bdf8;">
+        <div class="d-flex align-items-start">
+            <i class="fa-solid fa-circle-info me-2 mt-1 fs-5"></i>
+            <div>
+                <span class="fw-bold d-block">Simulation Disclaimer</span>
+                This is a hypothetical cost simulation based on historical billing data. It does not modify OCI resources or guarantee future savings.
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Configuration Panel -->
+        <div class="col-lg-5">
+            <div class="card glass-card p-4 h-100">
+                <h4 class="fw-bold text-white mb-4"><i class="fa-solid fa-gear text-info me-2"></i>Configure Simulation</h4>
+                <form id="simulationForm" method="POST" action="{% url 'cost-simulator' %}">
+                    {% csrf_token %}
+
+                    <!-- Time Period Selector -->
+                    <div class="mb-4">
+                        <label class="form-label text-secondary fw-semibold">Simulation Period</label>
+                        <select name="period" id="periodSelect" class="form-select form-control-custom" onchange="toggleCustomDates()">
+                            <option value="CURRENT_MONTH" {% if period == "CURRENT_MONTH" %}selected{% endif %}>Current Month</option>
+                            <option value="LAST_MONTH" {% if period == "LAST_MONTH" %}selected{% endif %}>Last Month</option>
+                            <option value="LAST_30_DAYS" {% if period == "LAST_30_DAYS" %}selected{% endif %}>Last 30 Days</option>
+                            <option value="CUSTOM" {% if period == "CUSTOM" %}selected{% endif %}>Custom Period</option>
+                        </select>
+                    </div>
+
+                    <!-- Custom Date Fields -->
+                    <div class="row g-3 mb-4 d-none" id="customDateRow">
+                        <div class="col-6">
+                            <label class="form-label text-secondary text-sm">Start Date</label>
+                            <input type="date" name="start_date" id="startDateInput" class="form-control form-control-custom" value="{{ start_date }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-secondary text-sm">End Date</label>
+                            <input type="date" name="end_date" id="endDateInput" class="form-control form-control-custom" value="{{ end_date }}">
+                        </div>
+                    </div>
+
+                    <!-- Action Builders Accordion -->
+                    <div class="card bg-transparent border-0 mb-4">
+                        <label class="form-label text-secondary fw-semibold mb-2">Add Simulation Actions</label>
+                        
+                        <!-- Manual Action Builder -->
+                        <div class="glass-card p-3 mb-3">
+                            <h6 class="fw-bold text-info mb-3"><i class="fa-solid fa-plus me-1"></i>Manual Cost Adjustment</h6>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label class="text-secondary text-xs mb-1">Service Target</label>
+                                    <select id="manualService" class="form-select form-control-custom py-1.5 fs-7">
+                                        <option value="All Services">All Services</option>
+                                        <option value="Unknown Service">Unknown Service</option>
+                                        {% for svc in available_services %}
+                                        <option value="{{ svc }}">{{ svc }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="text-secondary text-xs mb-1">Currency</label>
+                                    <select id="manualCurrency" class="form-select form-control-custom py-1.5 fs-7">
+                                        {% for cur in available_currencies %}
+                                        <option value="{{ cur }}">{{ cur }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label class="text-secondary text-xs mb-1">Adjustment Type</label>
+                                    <select id="manualActionType" class="form-select form-control-custom py-1.5 fs-7">
+                                        <option value="PERCENT_DECREASE">Percentage Decrease (-%)</option>
+                                        <option value="PERCENT_INCREASE">Percentage Increase (+%)</option>
+                                        <option value="FIXED_DECREASE">Fixed Cost Decrease (-)</option>
+                                        <option value="FIXED_INCREASE">Fixed Cost Increase (+)</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="text-secondary text-xs mb-1">Value</label>
+                                    <input type="number" id="manualValue" class="form-control form-control-custom py-1.5 fs-7" step="any" min="0" placeholder="0">
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-semibold" onclick="addManualAction()">
+                                <i class="fa-solid fa-circle-plus me-1"></i>Add Adjustment Action
+                            </button>
+                        </div>
+
+                        <!-- Recommendation Builder -->
+                        <div class="glass-card p-3">
+                            <h6 class="fw-bold text-info mb-3"><i class="fa-solid fa-lightbulb me-1"></i>Recommendation Realization</h6>
+                            <div class="mb-3">
+                                <label class="text-secondary text-xs mb-1">Open Recommendations</label>
+                                <select id="recommendationSelect" class="form-select form-control-custom py-1.5 fs-7">
+                                    <option value="">-- Select Recommendation --</option>
+                                    {% for rec in open_recommendations %}
+                                    <option value="{{ rec.id }}" data-savings="{{ rec.estimated_monthly_savings }}" data-currency="{{ rec.currency }}" data-service="{{ rec.service_name }}">
+                                        Rec #{{ rec.id }} - {{ rec.get_recommendation_type_display }} ({{ rec.estimated_monthly_savings }} {{ rec.currency }} savings)
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-semibold" onclick="addRecommendationAction()">
+                                <i class="fa-solid fa-circle-plus me-1"></i>Add Recommendation Action
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Scenario Actions Table / List -->
+                    <div class="mb-4">
+                        <label class="form-label text-secondary fw-semibold mb-2">Scenario Action Pipeline</label>
+                        <div id="actionsContainer" style="max-height: 250px; overflow-y: auto;">
+                            <!-- Dynamically filled or pre-rendered actions -->
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-primary-glow w-100 py-3 fw-bold fs-5">
+                        <i class="fa-solid fa-play me-2"></i>Run Simulation Scenario
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Output Results Panel -->
+        <div class="col-lg-7">
+            <div class="card glass-card p-4 h-100">
+                <h4 class="fw-bold text-white mb-4"><i class="fa-solid fa-square-poll-vertical text-info me-2"></i>Simulation Results</h4>
+                
+                {% if simulation_result %}
+                <div class="mb-4 text-secondary text-sm">
+                    Simulation Range: <span class="text-white fw-semibold">{{ simulation_result.start_date }}</span> to <span class="text-white fw-semibold">{{ simulation_result.end_date }}</span>
+                </div>
+
+                {% for curr, res in simulation_result.currency_results.items %}
+                <div class="results-panel glass-card p-4 mb-4" style="border-left-color: {% if res.absolute_change < 0 %}#22c55e{% elif res.absolute_change > 0 %}#ef4444{% else %}var(--accent-color){% endif %} !important;">
+                    <h5 class="fw-bold text-white mb-3 d-flex justify-content-between">
+                        <span>Currency Output: {{ curr }}</span>
+                        {% if res.absolute_change < 0 %}
+                        <span class="text-success text-sm fw-normal"><i class="fa-solid fa-circle-arrow-down me-1"></i>Cost Decrease</span>
+                        {% elif res.absolute_change > 0 %}
+                        <span class="text-danger text-sm fw-normal"><i class="fa-solid fa-circle-arrow-up me-1"></i>Cost Increase</span>
+                        {% endif %}
+                    </h5>
+                    
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block mb-1">Baseline Cost</span>
+                            <span class="text-white kpi-num">{{ res.baseline_cost }}</span> <span class="text-secondary">{{ curr }}</span>
+                        </div>
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block mb-1">Simulated Cost</span>
+                            <span class="text-white kpi-num">{{ res.simulated_cost }}</span> <span class="text-secondary">{{ curr }}</span>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block mb-1">Estimated Difference</span>
+                            <span class="{% if res.absolute_change < 0 %}text-success{% elif res.absolute_change > 0 %}text-danger{% else %}text-white{% endif %} fw-bold fs-4">
+                                {{ res.absolute_change }}
+                            </span> <span class="text-secondary">{{ curr }}</span>
+                        </div>
+                        <div class="col-md-6">
+                            <span class="text-secondary text-xs d-block mb-1">Percentage Difference</span>
+                            <span class="{% if res.absolute_change < 0 %}text-success{% elif res.absolute_change > 0 %}text-danger{% else %}text-white{% endif %} fw-bold fs-4">
+                                {% if res.percentage_change is not None %}
+                                {{ res.percentage_change }}%
+                                {% else %}
+                                N/A (Zero Baseline)
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+
+                    {% if res.estimated_savings > 0 %}
+                    <div class="mb-4">
+                        <span class="text-secondary text-xs d-block mb-1">Simulated Monthly Savings</span>
+                        <h4 class="text-success fw-bold m-0"><i class="fa-solid fa-piggy-bank me-2"></i>{{ res.estimated_savings }} <span class="fs-6 fw-normal text-secondary">{{ curr }}</span></h4>
+                    </div>
+                    {% endif %}
+
+                    <!-- Chart Container -->
+                    <div class="mb-4" style="height: 220px; width: 100%;">
+                        <canvas id="chart-{{ curr }}"></canvas>
+                    </div>
+
+                    <!-- Actions applied summary -->
+                    <div>
+                        <span class="text-secondary text-xs d-block mb-2 fw-semibold">Actions Applied to {{ curr }}:</span>
+                        <ul class="list-group list-group-flush bg-transparent">
+                            {% for act in res.actions_applied %}
+                            <li class="list-group-item bg-transparent text-white border-secondary border-opacity-25 px-0 py-2 text-sm d-flex justify-content-between align-items-center">
+                                <div>
+                                    <i class="fa-solid {% if act.type == 'recommendation' %}fa-lightbulb text-warning{% else %}fa-gears text-info{% endif %} me-2"></i>
+                                    {{ act.description }}
+                                </div>
+                                <span class="badge bg-secondary opacity-75">{{ act.action_type }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fa-solid fa-circle-play text-secondary opacity-25 mb-4" style="font-size: 6rem;"></i>
+                    <h5 class="fw-bold text-white mb-2">No Simulation Active</h5>
+                    <p class="text-secondary max-w-md mx-auto">
+                        Configure dates and add adjustments in the left panel, then hit "Run Simulation Scenario" to see interactive comparison charts and tables.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize standard actions state from template postback context
+    let actionPipeline = [];
+    
+    {% if actions %}
+        {% for act in actions %}
+            actionPipeline.push({
+                action_type: "{{ act.action_type }}",
+                service: "{{ act.service|default:'' }}",
+                currency: "{{ act.currency|default:'' }}",
+                value: "{{ act.value|default:'' }}",
+                recommendation_id: "{{ act.recommendation_id|default:'' }}"
+            });
+        {% endfor %}
+    {% endif %}
+
+    function toggleCustomDates() {
+        const period = document.getElementById("periodSelect").value;
+        const row = document.getElementById("customDateRow");
+        if (period === "CUSTOM") {
+            row.classList.remove("d-none");
+            document.getElementById("startDateInput").required = true;
+            document.getElementById("endDateInput").required = true;
+        } else {
+            row.classList.add("d-none");
+            document.getElementById("startDateInput").required = false;
+            document.getElementById("endDateInput").required = false;
+        }
+    }
+
+    function renderActions() {
+        const container = document.getElementById("actionsContainer");
+        container.innerHTML = "";
+        
+        if (actionPipeline.length === 0) {
+            container.innerHTML = `<div class="text-secondary text-sm text-center py-3 border border-secondary border-dashed border-opacity-25 rounded-3">No actions added to scenario.</div>`;
+            return;
+        }
+        
+        actionPipeline.forEach((act, idx) => {
+            let label = "";
+            if (act.action_type === "RECOMMENDATION_SAVINGS") {
+                label = `<strong>Rec #${act.recommendation_id}</strong> Savings Realization`;
+            } else {
+                let sign = (act.action_type.includes("DECREASE")) ? "-" : "+";
+                let symbol = (act.action_type.includes("PERCENT")) ? "%" : ` ${act.currency}`;
+                label = `<strong>${act.service} (${act.currency})</strong> ${sign}${act.value}${symbol}`;
+            }
+            
+            const div = document.createElement("div");
+            div.className = "action-row d-flex justify-content-between align-items-center";
+            div.innerHTML = `
+                <div class="text-white text-sm">
+                    ${label}
+                    <!-- Hidden fields to post actions array to Django -->
+                    <input type="hidden" name="action_type[]" value="${act.action_type}">
+                    <input type="hidden" name="service[]" value="${act.service}">
+                    <input type="hidden" name="currency[]" value="${act.currency}">
+                    <input type="hidden" name="value[]" value="${act.value}">
+                    <input type="hidden" name="recommendation_id[]" value="${act.recommendation_id}">
+                </div>
+                <button type="button" class="btn btn-outline-danger btn-sm border-0 py-1" onclick="removeAction(${idx})">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function addManualAction() {
+        const service = document.getElementById("manualService").value;
+        const currency = document.getElementById("manualCurrency").value;
+        const action_type = document.getElementById("manualActionType").value;
+        const valueInput = document.getElementById("manualValue");
+        const value = valueInput.value;
+        
+        if (!value || parseFloat(value) < 0) {
+            alert("Please enter a valid non-negative adjustment value.");
+            return;
+        }
+        
+        // Add to array
+        actionPipeline.push({
+            action_type: action_type,
+            service: service,
+            currency: currency,
+            value: value,
+            recommendation_id: ""
+        });
+        
+        valueInput.value = "";
+        renderActions();
+    }
+
+    function addRecommendationAction() {
+        const select = document.getElementById("recommendationSelect");
+        const recId = select.value;
+        if (!recId) {
+            alert("Please select a recommendation to simulate.");
+            return;
+        }
+        
+        const option = select.options[select.selectedIndex];
+        const savings = option.getAttribute("data-savings");
+        const currency = option.getAttribute("data-currency");
+        const service = option.getAttribute("data-service");
+        
+        // Add recommendation action
+        actionPipeline.push({
+            action_type: "RECOMMENDATION_SAVINGS",
+            service: service || "",
+            currency: currency || "",
+            value: savings,
+            recommendation_id: recId
+        });
+        
+        select.value = "";
+        renderActions();
+    }
+
+    function removeAction(idx) {
+        actionPipeline.splice(idx, 1);
+        renderActions();
+    }
+
+    // Chart.js render function
+    function initCharts() {
+        {% if chart_data_json %}
+        const data = JSON.parse('{{ chart_data_json|safe }}');
+        Object.keys(data).forEach(curr => {
+            const ctx = document.getElementById(`chart-${curr}`);
+            if (!ctx) return;
+            
+            const currData = data[curr];
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Baseline Cost', 'Simulated Cost'],
+                    datasets: [{
+                        label: `Spend (${curr})`,
+                        data: [currData.baseline, currData.simulated],
+                        backgroundColor: [
+                            'rgba(56, 189, 248, 0.4)', // baseline color
+                            currData.difference <= 0 ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)' // simulated color (green if saving, red if increase)
+                        ],
+                        borderColor: [
+                            'rgba(56, 189, 248, 1)',
+                            currData.difference <= 0 ? 'rgba(34, 197, 94, 1)' : 'rgba(239, 68, 68, 1)'
+                        ],
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: 'rgba(255, 255, 255, 0.6)' }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: 'rgba(255, 255, 255, 0.8)' }
+                        }
+                    }
+                }
+            });
+        });
+        {% endif %}
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        toggleCustomDates();
+        renderActions();
+        initCharts();
+    });
+</script>
+{% endblock %}

@@ -22,9 +22,9 @@ def classify_service(service_string: str) -> str:
     return "UNKNOWN"
 
 
-def generate_fingerprint(user_id, rec_type, scope, src_type, src_id, identity_type, identity_value, service, region, currency) -> str:
+def generate_fingerprint(project_id, rec_type, scope, src_type, src_id, identity_type, identity_value, service, region, currency) -> str:
     """Generate a deterministic SHA-256 fingerprint hash for a recommendation."""
-    raw_str = f"{user_id}|{rec_type}|{scope}|{src_type or ''}|{src_id or ''}|{identity_type}|{identity_value}|{service}|{region}|{currency}"
+    raw_str = f"{project_id}|{rec_type}|{scope}|{src_type or ''}|{src_id or ''}|{identity_type}|{identity_value}|{service}|{region}|{currency}"
     return hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
 
 
@@ -50,9 +50,26 @@ def calculate_stats(decimal_list):
 
 
 def run_recommendation_engine(user):
-    """Run the deterministic recommendation engine for a specific user and return the count generated."""
+    """
+    DEPRECATED: Backward compatibility wrapper for user-based recommendation run.
+    Use run_recommendation_engine_for_project instead.
+    """
+    import warnings
+    warnings.warn(
+        "run_recommendation_engine is deprecated. Use run_recommendation_engine_for_project instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return run_recommendation_engine_for_project(project, actor_user=user)
+
+def run_recommendation_engine_for_project(project, actor_user=None):
+    """Run the deterministic recommendation engine for a specific project and return the count generated."""
+    if not project:
+        return 0
     # Find latest billing record to anchor our 30-day window
-    latest_record = BillingRecord.objects.filter(upload__uploaded_by=user).order_by('-usage_start').first()
+    latest_record = BillingRecord.objects.filter(upload__project=project).order_by('-usage_start').first()
     if latest_record and latest_record.usage_start:
         latest_date = latest_record.usage_start.date()
     else:
@@ -69,7 +86,7 @@ def run_recommendation_engine(user):
         # ----------------------------------------------------
         # 1. RIGHTSIZE_REVIEW & STORAGE_OPTIMIZATION (from WasteFinding)
         # ----------------------------------------------------
-        open_waste = WasteFinding.objects.filter(user=user, status="OPEN")
+        open_waste = WasteFinding.objects.filter(project=project, status="OPEN")
         for wf in open_waste:
             normalized_service = classify_service(wf.service_name)
             
@@ -113,7 +130,7 @@ def run_recommendation_engine(user):
                 identity_value = ""
 
             fingerprint = generate_fingerprint(
-                user.id, rec_type, "RESOURCE", "WASTE_FINDING", wf.id,
+                project.id, rec_type, "RESOURCE", "WASTE_FINDING", wf.id,
                 identity_type, identity_value, normalized_service, wf.region or "UNKNOWN", wf.currency
             )
 
@@ -140,9 +157,10 @@ def run_recommendation_engine(user):
 
             # Update or create preserving user workflow status
             rec, created = Recommendation.objects.get_or_create(
-                user=user,
+                project=project,
                 fingerprint=fingerprint,
                 defaults={
+                    "user": actor_user,
                     "recommendation_type": rec_type,
                     "recommendation_scope": "RESOURCE",
                     "resource_id": resource_id_trimmed,
@@ -175,6 +193,7 @@ def run_recommendation_engine(user):
                 rec.evidence = evidence_text
                 rec.recommended_action = rec_action
                 rec.limitations = limitation_text
+                rec.user = actor_user
                 
                 # Check cache hash to mark stale if needed
                 new_hash = generate_explanation_hash(rec)
@@ -190,7 +209,7 @@ def run_recommendation_engine(user):
         # ----------------------------------------------------
         # Query compute/database spends over the last 30 calendar dates
         billing_records = BillingRecord.objects.filter(
-            upload__uploaded_by=user,
+            upload__project=project,
             usage_start__gte=start_dt,
             usage_start__lte=end_dt
         )
@@ -249,7 +268,7 @@ def run_recommendation_engine(user):
             monthly_cost = sum(costs)
 
             fingerprint = generate_fingerprint(
-                user.id, rec_type, "SERVICE_REGION", "BILLING_PATTERN", None,
+                project.id, rec_type, "SERVICE_REGION", "BILLING_PATTERN", None,
                 "unknown", "", service, region, currency
             )
 
@@ -270,9 +289,10 @@ def run_recommendation_engine(user):
                 priority = "LOW"
 
             rec, created = Recommendation.objects.get_or_create(
-                user=user,
+                project=project,
                 fingerprint=fingerprint,
                 defaults={
+                    "user": actor_user,
                     "recommendation_type": rec_type,
                     "recommendation_scope": "SERVICE_REGION",
                     "resource_id": "",
@@ -303,6 +323,7 @@ def run_recommendation_engine(user):
                 rec.evidence = evidence_text
                 rec.recommended_action = rec_action
                 rec.limitations = limitation_text
+                rec.user = actor_user
                 
                 new_hash = generate_explanation_hash(rec)
                 if rec.ai_explanation_hash != new_hash:
@@ -376,7 +397,7 @@ def run_recommendation_engine(user):
             )
 
             fingerprint = generate_fingerprint(
-                user.id, rec_type, "RESOURCE", "BILLING_PATTERN", None,
+                project.id, rec_type, "RESOURCE", "BILLING_PATTERN", None,
                 identity_type, identity_value, service, region, currency
             )
 
@@ -390,9 +411,10 @@ def run_recommendation_engine(user):
                 priority = "LOW"
 
             rec, created = Recommendation.objects.get_or_create(
-                user=user,
+                project=project,
                 fingerprint=fingerprint,
                 defaults={
+                    "user": actor_user,
                     "recommendation_type": rec_type,
                     "recommendation_scope": "RESOURCE",
                     "resource_id": res_id,
@@ -423,6 +445,7 @@ def run_recommendation_engine(user):
                 rec.evidence = evidence_text
                 rec.recommended_action = rec_action
                 rec.limitations = limitation_text
+                rec.user = actor_user
                 
                 new_hash = generate_explanation_hash(rec)
                 if rec.ai_explanation_hash != new_hash:
@@ -435,7 +458,7 @@ def run_recommendation_engine(user):
         # ----------------------------------------------------
         # 4. COST_PATTERN_REVIEW (from CostAnomaly)
         # ----------------------------------------------------
-        open_anomalies = CostAnomaly.objects.filter(user=user, status="OPEN", severity__in=["HIGH", "CRITICAL"])
+        open_anomalies = CostAnomaly.objects.filter(project=project, status="OPEN", severity__in=["HIGH", "CRITICAL"])
         for ca in open_anomalies:
             rec_type = "COST_PATTERN_REVIEW"
             rec_action = (
@@ -463,7 +486,7 @@ def run_recommendation_engine(user):
             normalized_service = classify_service(ca.service_name)
 
             fingerprint = generate_fingerprint(
-                user.id, rec_type, "RESOURCE", "COST_ANOMALY", ca.id,
+                project.id, rec_type, "RESOURCE", "COST_ANOMALY", ca.id,
                 identity_type, identity_value, normalized_service, ca.region or "UNKNOWN", "USD"
             )
 
@@ -478,9 +501,10 @@ def run_recommendation_engine(user):
             priority = "CRITICAL" if ca.severity == "CRITICAL" else "HIGH"
 
             rec, created = Recommendation.objects.get_or_create(
-                user=user,
+                project=project,
                 fingerprint=fingerprint,
                 defaults={
+                    "user": actor_user,
                     "recommendation_type": rec_type,
                     "recommendation_scope": "RESOURCE",
                     "resource_id": resource_id_trimmed,
@@ -511,6 +535,7 @@ def run_recommendation_engine(user):
                 rec.evidence = evidence_text
                 rec.recommended_action = rec_action
                 rec.limitations = limitation_text
+                rec.user = actor_user
                 
                 new_hash = generate_explanation_hash(rec)
                 if rec.ai_explanation_hash != new_hash:

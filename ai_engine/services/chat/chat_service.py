@@ -5,27 +5,61 @@ from django.shortcuts import get_object_or_404
 from ai_engine.models import ChatSession, ChatMessage
 from ai_engine.services.chat.intent_schema import QueryPlanValidator
 from ai_engine.services.chat.query_planner import plan_chat_query
-from ai_engine.services.chat.query_executor import execute_query_plan
+from ai_engine.services.chat.query_executor import execute_query_plan, execute_query_plan_for_project
 from ai_engine.services.chat.response_builder import build_grounded_response
 
 logger = logging.getLogger(__name__)
 
 def get_chat_sessions_for_user(user):
-    """Retrieves all chat sessions for a user, ordered by most recently updated."""
-    return ChatSession.objects.filter(user=user).order_by("-updated_at")
+    """
+    Backward compatibility wrapper for user-based chat session listing.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_chat_sessions_for_project_user(project, user)
+
+def get_chat_sessions_for_project_user(project, user):
+    """Retrieves all chat sessions for a user within a project, ordered by most recently updated."""
+    if not project:
+        return ChatSession.objects.none()
+    return ChatSession.objects.filter(project=project, user=user).order_by("-updated_at")
 
 def get_or_create_chat_session(user, session_id=None) -> ChatSession:
-    """Helper to retrieve or create a new ChatSession for isolation check."""
+    """
+    Backward compatibility wrapper for get_or_create_chat_session.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_or_create_chat_session_for_project(project, user, session_id)
+
+def get_or_create_chat_session_for_project(project, user, session_id=None) -> ChatSession:
+    """Helper to retrieve or create a new ChatSession for isolation check within a project."""
     if session_id:
-        return get_object_or_404(ChatSession, pk=session_id, user=user)
-    return ChatSession.objects.create(user=user, title="New Chat")
+        return get_object_or_404(ChatSession, pk=session_id, project=project, user=user)
+    return ChatSession.objects.create(project=project, user=user, title="New Chat")
 
 def delete_chat_session(user, session_id) -> None:
+    """
+    Backward compatibility wrapper for delete_chat_session.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    delete_chat_session_for_project(project, user, session_id)
+
+def delete_chat_session_for_project(project, user, session_id) -> None:
     """Deletes a ChatSession after verifying ownership."""
-    session = get_object_or_404(ChatSession, pk=session_id, user=user)
+    session = get_object_or_404(ChatSession, pk=session_id, project=project, user=user)
     session.delete()
 
 def send_chat_message(user, session_id, message_content) -> ChatMessage:
+    """
+    Backward compatibility wrapper for send_chat_message.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return send_chat_message_for_project(project, user, session_id, message_content)
+
+def send_chat_message_for_project(project, user, session_id, message_content) -> ChatMessage:
     """
     Orchestrates the chat message pipeline:
     1. Saves USER message.
@@ -36,7 +70,7 @@ def send_chat_message(user, session_id, message_content) -> ChatMessage:
     6. Calls Grounded Response Builder (or fallbacks).
     7. Stores ASSISTANT message with audit metadata.
     """
-    session = get_object_or_404(ChatSession, pk=session_id, user=user)
+    session = get_object_or_404(ChatSession, pk=session_id, project=project, user=user)
     message_content = message_content.strip()
 
     if not message_content:
@@ -98,7 +132,7 @@ def send_chat_message(user, session_id, message_content) -> ChatMessage:
     # 5. Execute Plan Deterministically via Django ORM
     query_failed = False
     try:
-        context = execute_query_plan(user, plan)
+        context = execute_query_plan_for_project(project, user, plan)
     except Exception as e:
         logger.error("Chat query executor failed: %s", type(e).__name__)
         query_failed = True

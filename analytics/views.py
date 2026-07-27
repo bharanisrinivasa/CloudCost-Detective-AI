@@ -1,19 +1,20 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponseForbidden, HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
+from django.core.exceptions import PermissionDenied
+from accounts.permissions import ProjectPermissionRequiredMixin, get_active_project
 from analytics.models import CostAnomaly
-from analytics.services.anomaly_detector import run_anomaly_detection_for_user
+from analytics.services.anomaly_detector import run_anomaly_detection_for_project
 
-class AnomalyListView(LoginRequiredMixin, View):
+class AnomalyListView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/anomaly_list.html"
+    required_capability = "VIEW_DASHBOARD"
     
     def get(self, request, *args, **kwargs):
-        user = request.user
-        queryset = CostAnomaly.objects.filter(user=user).order_by('-detected_date', '-detected_at')
+        queryset = CostAnomaly.objects.filter(project=self.active_project).order_by('-detected_date', '-detected_at')
         
         # Get active filters from GET params
         severity = request.GET.get('severity', '')
@@ -45,32 +46,36 @@ class AnomalyListView(LoginRequiredMixin, View):
                 'status': status,
                 'start_date': start_date,
                 'end_date': end_date,
-            }
+            },
+            'active_project': self.active_project
         }
         return render(request, self.template_name, context)
 
-class AnomalyDetailView(LoginRequiredMixin, View):
+class AnomalyDetailView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/anomaly_detail.html"
+    required_capability = "VIEW_DASHBOARD"
     
     def get(self, request, pk, *args, **kwargs):
-        # Isolation: guarantee scoping to requesting user
         anomaly = get_object_or_404(CostAnomaly, pk=pk)
-        if anomaly.user != request.user:
-            return HttpResponseForbidden("You are not authorized to view this anomaly.")
+        from accounts.models import OrganizationMembership
+        if not OrganizationMembership.objects.filter(user=request.user, organization=anomaly.project.organization).exists():
+            raise PermissionDenied("You do not have access to this project.")
+        if anomaly.project != self.active_project:
+            raise PermissionDenied("Object does not belong to the active project.")
             
         context = {
             'anomaly': anomaly,
             'status_choices': CostAnomaly.STATUS_CHOICES,
+            'active_project': self.active_project
         }
         return render(request, self.template_name, context)
 
-class TriggerAnomalyDetectionView(LoginRequiredMixin, View):
+class TriggerAnomalyDetectionView(ProjectPermissionRequiredMixin, View):
+    required_capability = "RUN_ANALYTICS"
+
     def post(self, request, *args, **kwargs):
-        user = request.user
-        start_time = timezone.now()
-        
-        # Run synchronous detection
-        results = run_anomaly_detection_for_user(user)
+        # Run synchronous detection scoped to project
+        results = run_anomaly_detection_for_project(self.active_project, actor_user=request.user)
         
         # Add notification messages
         if results.get('message'):
@@ -88,11 +93,16 @@ class TriggerAnomalyDetectionView(LoginRequiredMixin, View):
             
         return redirect(reverse('anomaly-list'))
 
-class UpdateAnomalyStatusView(LoginRequiredMixin, View):
+class UpdateAnomalyStatusView(ProjectPermissionRequiredMixin, View):
+    required_capability = "UPDATE_ANALYTICS_STATUS"
+
     def post(self, request, pk, *args, **kwargs):
         anomaly = get_object_or_404(CostAnomaly, pk=pk)
-        if anomaly.user != request.user:
-            return HttpResponseForbidden("You are not authorized to update this anomaly.")
+        from accounts.models import OrganizationMembership
+        if not OrganizationMembership.objects.filter(user=request.user, organization=anomaly.project.organization).exists():
+            raise PermissionDenied("You do not have access to this project.")
+        if anomaly.project != self.active_project:
+            raise PermissionDenied("Object does not belong to the active project.")
             
         new_status = request.POST.get('status', '').upper()
         valid_statuses = [choice[0] for choice in CostAnomaly.STATUS_CHOICES]
@@ -110,14 +120,14 @@ class UpdateAnomalyStatusView(LoginRequiredMixin, View):
 # --- MODULE 6: WASTE DETECTION VIEWS ---
 from django.db.models import Sum
 from analytics.models import WasteFinding
-from analytics.services.waste_detector import run_waste_detection_for_user
+from analytics.services.waste_detector import run_waste_detection_for_project
 
-class WasteListView(LoginRequiredMixin, View):
+class WasteListView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/waste_list.html"
+    required_capability = "VIEW_DASHBOARD"
     
     def get(self, request, *args, **kwargs):
-        user = request.user
-        queryset = WasteFinding.objects.filter(user=user).order_by('-total_cost', '-detected_at')
+        queryset = WasteFinding.objects.filter(project=self.active_project).order_by('-total_cost', '-detected_at')
         
         # Get active filters from GET params
         waste_type = request.GET.get('waste_type', '')
@@ -140,26 +150,27 @@ class WasteListView(LoginRequiredMixin, View):
             
         # Get distinct services and regions for filters
         distinct_services = list(
-            WasteFinding.objects.filter(user=user)
+            WasteFinding.objects.filter(project=self.active_project)
             .values_list('service_name', flat=True)
             .distinct()
             .order_by('service_name')
         )
         distinct_regions = list(
-            WasteFinding.objects.filter(user=user)
+            WasteFinding.objects.filter(project=self.active_project)
             .values_list('region', flat=True)
             .distinct()
             .order_by('region')
         )
         
         # Calculate summary savings grouped by currency for open findings
-        open_findings = WasteFinding.objects.filter(user=user, status="OPEN")
+        open_findings = WasteFinding.objects.filter(project=self.active_project, status="OPEN")
         savings_by_currency = (
             open_findings.values('currency')
             .annotate(total_savings=Sum('estimated_monthly_savings'))
             .order_by('currency')
         )
         
+        # Deduplicated savings display
         savings_parts = []
         for item in savings_by_currency:
             savings_parts.append(f"{item['total_savings']:.2f} {item['currency']}")
@@ -170,7 +181,7 @@ class WasteListView(LoginRequiredMixin, View):
         # Total wasteful resources analyzed
         from billing.models import BillingRecord
         total_analyzed_resources = (
-            BillingRecord.objects.filter(upload__uploaded_by=user)
+            BillingRecord.objects.filter(upload__project=self.active_project)
             .exclude(resource_id__isnull=True)
             .exclude(resource_id="")
             .values('resource_id')
@@ -179,7 +190,7 @@ class WasteListView(LoginRequiredMixin, View):
         )
         if total_analyzed_resources == 0:
             total_analyzed_resources = (
-                BillingRecord.objects.filter(upload__uploaded_by=user)
+                BillingRecord.objects.filter(upload__project=self.active_project)
                 .exclude(resource_name__isnull=True)
                 .exclude(resource_name="")
                 .values('resource_name')
@@ -203,31 +214,38 @@ class WasteListView(LoginRequiredMixin, View):
                 'status': status,
                 'service_name': service,
                 'region': region,
-            }
+            },
+            'active_project': self.active_project
         }
         return render(request, self.template_name, context)
 
-class WasteDetailView(LoginRequiredMixin, View):
+class WasteDetailView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/waste_detail.html"
+    required_capability = "VIEW_DASHBOARD"
     
     def get(self, request, pk, *args, **kwargs):
         finding = get_object_or_404(WasteFinding, pk=pk)
-        if finding.user != request.user:
-            return HttpResponseForbidden("You are not authorized to view this waste finding.")
+        from accounts.models import OrganizationMembership
+        if not OrganizationMembership.objects.filter(user=request.user, organization=finding.project.organization).exists():
+            raise PermissionDenied("You do not have access to this project.")
+        if finding.project != self.active_project:
+            raise PermissionDenied("Object does not belong to the active project.")
             
         context = {
             'finding': finding,
             'status_choices': WasteFinding.STATUS_CHOICES,
+            'active_project': self.active_project
         }
         return render(request, self.template_name, context)
 
-class TriggerWasteDetectionView(LoginRequiredMixin, View):
+class TriggerWasteDetectionView(ProjectPermissionRequiredMixin, View):
+    required_capability = "RUN_ANALYTICS"
+
     def post(self, request, *args, **kwargs):
-        user = request.user
         import time
         start_time = time.time()
         
-        results = run_waste_detection_for_user(user)
+        results = run_waste_detection_for_project(self.active_project, actor_user=request.user)
         duration = time.time() - start_time
         
         total_found = results['created'] + results['updated']
@@ -247,11 +265,16 @@ class TriggerWasteDetectionView(LoginRequiredMixin, View):
         messages.success(request, msg)
         return redirect(reverse('waste-list'))
 
-class UpdateWasteStatusView(LoginRequiredMixin, View):
+class UpdateWasteStatusView(ProjectPermissionRequiredMixin, View):
+    required_capability = "UPDATE_ANALYTICS_STATUS"
+
     def post(self, request, pk, *args, **kwargs):
         finding = get_object_or_404(WasteFinding, pk=pk)
-        if finding.user != request.user:
-            return HttpResponseForbidden("You are not authorized to update this waste finding.")
+        from accounts.models import OrganizationMembership
+        if not OrganizationMembership.objects.filter(user=request.user, organization=finding.project.organization).exists():
+            raise PermissionDenied("You do not have access to this project.")
+        if finding.project != self.active_project:
+            raise PermissionDenied("Object does not belong to the active project.")
             
         new_status = request.POST.get('status', '').upper()
         valid_statuses = [choice[0] for choice in WasteFinding.STATUS_CHOICES]
@@ -266,13 +289,13 @@ class UpdateWasteStatusView(LoginRequiredMixin, View):
         return redirect(reverse('waste-detail', kwargs={'pk': pk}))
 
 
-class RecommendationListView(LoginRequiredMixin, View):
+class RecommendationListView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/recommendation_list.html"
+    required_capability = "VIEW_DASHBOARD"
 
     def get(self, request, *args, **kwargs):
         from ai_engine.models import Recommendation
-        user = request.user
-        queryset = Recommendation.objects.filter(user=user).order_by('-detected_at')
+        queryset = Recommendation.objects.filter(project=self.active_project).order_by('-detected_at')
 
         # Get filter params
         rec_type = request.GET.get("recommendation_type", "")
@@ -295,8 +318,8 @@ class RecommendationListView(LoginRequiredMixin, View):
         if region:
             queryset = queryset.filter(region__iexact=region)
 
-        # Retrieve summary metrics for all open user recommendations (unfiltered)
-        open_recs = Recommendation.objects.filter(user=user, status="OPEN")
+        # Retrieve summary metrics for all open project recommendations (unfiltered)
+        open_recs = Recommendation.objects.filter(project=self.active_project, status="OPEN")
         open_count = open_recs.count()
         high_priority_count = open_recs.filter(priority__in=["HIGH", "CRITICAL"]).count()
 
@@ -335,36 +358,39 @@ class RecommendationListView(LoginRequiredMixin, View):
                 "status": status,
                 "service": service,
                 "region": region,
-            }
+            },
+            "active_project": self.active_project
         }
         return render(request, self.template_name, context)
 
 
-class RecommendationDetailView(LoginRequiredMixin, View):
+class RecommendationDetailView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/recommendation_detail.html"
+    required_capability = "VIEW_DASHBOARD"
 
     def get(self, request, pk, *args, **kwargs):
         from ai_engine.models import Recommendation
-        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+        rec = get_object_or_404(Recommendation, pk=pk, project=self.active_project)
 
-        # Resolve deterministic source object securely (user-scoped)
+        # Resolve deterministic source object securely (project-scoped)
         source_obj = None
         if rec.source_type == "WASTE_FINDING" and rec.source_id is not None:
-            source_obj = WasteFinding.objects.filter(pk=rec.source_id, user=request.user).first()
+            source_obj = WasteFinding.objects.filter(pk=rec.source_id, project=self.active_project).first()
         elif rec.source_type == "COST_ANOMALY" and rec.source_id is not None:
-            source_obj = CostAnomaly.objects.filter(pk=rec.source_id, user=request.user).first()
+            source_obj = CostAnomaly.objects.filter(pk=rec.source_id, project=self.active_project).first()
 
         context = {
             "recommendation": rec,
             "source_object": source_obj,
             "status_choices": Recommendation.STATUS_CHOICES,
+            "active_project": self.active_project
         }
         return render(request, self.template_name, context)
 
     def post(self, request, pk, *args, **kwargs):
         """POST view to trigger AI Explanation generation on-demand."""
         from ai_engine.models import Recommendation
-        from ai_engine.services.explanation_service import get_or_generate_recommendation_explanation
+        from ai_engine.services.explanation_service import get_or_generate_recommendation_explanation_for_project
         from ai_engine.services.provider import (
             LLMMissingAPIKeyError,
             LLMTimeoutError,
@@ -373,14 +399,15 @@ class RecommendationDetailView(LoginRequiredMixin, View):
             LLMException,
         )
 
-        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+        rec = get_object_or_404(Recommendation, pk=pk, project=self.active_project)
         force_regenerate = request.POST.get("regenerate", "false").lower() == "true"
 
         try:
-            get_or_generate_recommendation_explanation(
-                user=request.user,
+            get_or_generate_recommendation_explanation_for_project(
+                project=self.active_project,
                 rec=rec,
-                force_regenerate=force_regenerate
+                force_regenerate=force_regenerate,
+                actor_user=request.user
             )
             messages.success(request, "AI explanation generated successfully.")
         except LLMMissingAPIKeyError:
@@ -397,13 +424,15 @@ class RecommendationDetailView(LoginRequiredMixin, View):
         return redirect(reverse("recommendation-detail", kwargs={"pk": pk}))
 
 
-class TriggerRecommendationsView(LoginRequiredMixin, View):
+class TriggerRecommendationsView(ProjectPermissionRequiredMixin, View):
+    required_capability = "RUN_ANALYTICS"
+
     def post(self, request, *args, **kwargs):
-        from analytics.services.recommendation_engine import run_recommendation_engine
+        from analytics.services.recommendation_engine import run_recommendation_engine_for_project
         import time
         start_time = time.time()
         
-        count = run_recommendation_engine(request.user)
+        count = run_recommendation_engine_for_project(self.active_project, actor_user=request.user)
         duration = time.time() - start_time
         
         messages.success(
@@ -415,10 +444,12 @@ class TriggerRecommendationsView(LoginRequiredMixin, View):
         return redirect(reverse("recommendation-list"))
 
 
-class UpdateRecommendationStatusView(LoginRequiredMixin, View):
+class UpdateRecommendationStatusView(ProjectPermissionRequiredMixin, View):
+    required_capability = "UPDATE_ANALYTICS_STATUS"
+
     def post(self, request, pk, *args, **kwargs):
         from ai_engine.models import Recommendation
-        rec = get_object_or_404(Recommendation, pk=pk, user=request.user)
+        rec = get_object_or_404(Recommendation, pk=pk, project=self.active_project)
         
         new_status = request.POST.get("status", "").upper()
         valid_statuses = [choice[0] for choice in Recommendation.STATUS_CHOICES]
@@ -433,14 +464,15 @@ class UpdateRecommendationStatusView(LoginRequiredMixin, View):
         return redirect(reverse("recommendation-detail", kwargs={"pk": pk}))
 
 
-class ForecastView(LoginRequiredMixin, View):
+class ForecastView(ProjectPermissionRequiredMixin, View):
     template_name = "analytics/forecast.html"
+    required_capability = "VIEW_DASHBOARD"
 
     def get(self, request, *args, **kwargs):
         import datetime
-        from analytics.services.cost_forecaster import get_forecast_for_user
+        from analytics.services.cost_forecaster import get_forecast_for_project
 
-        forecast_results = get_forecast_for_user(request.user)
+        forecast_results = get_forecast_for_project(self.active_project)
 
         def format_month_label(month_str):
             yr, mn = map(int, month_str.split('-'))
@@ -506,7 +538,219 @@ class ForecastView(LoginRequiredMixin, View):
             "chart_data": chart_data,
             "has_multiple_currencies": has_multiple_currencies,
             "has_future_records_overall": has_future_records_overall,
+            "active_project": self.active_project
         }
         return render(request, self.template_name, context)
+
+
+class CostSimulatorView(ProjectPermissionRequiredMixin, View):
+    template_name = "analytics/simulator.html"
+    required_capability = "USE_SIMULATOR"
+
+    def get_common_context(self, request):
+        from billing.models import BillingRecord
+        from ai_engine.models import Recommendation
+
+        # Distinct project services
+        distinct_services = list(BillingRecord.objects.filter(
+            upload__project=self.active_project
+        ).values_list("service", flat=True).distinct())
+        distinct_services = sorted(list(set([s.strip() for s in distinct_services if s and s.strip()])))
+        if not distinct_services:
+            distinct_services = ["Compute", "Database", "Storage"]
+
+        # Project's open recommendations with non-null savings
+        recommendations = Recommendation.objects.filter(
+            project=self.active_project,
+            status="OPEN"
+        ).exclude(estimated_monthly_savings__isnull=True)
+
+        # Distinct project currencies
+        distinct_currencies = list(BillingRecord.objects.filter(
+            upload__project=self.active_project
+        ).values_list("currency", flat=True).distinct())
+        distinct_currencies = sorted(list(set([c.strip() for c in distinct_currencies if c and c.strip()])))
+        if not distinct_currencies:
+            distinct_currencies = ["USD"]
+
+        return {
+            "available_services": distinct_services,
+            "available_currencies": distinct_currencies,
+            "open_recommendations": recommendations,
+        }
+
+    def get(self, request, *args, **kwargs):
+        context = self.get_common_context(request)
+        context.update({
+            "period": "CURRENT_MONTH",
+            "start_date": "",
+            "end_date": "",
+            "actions": [],
+            "simulation_result": None,
+            "chart_data_json": None,
+            "active_project": self.active_project
+        })
+        return render(request, self.template_name, context)
+
+    def post(self, request, *args, **kwargs):
+        from analytics.services.cost_simulator import run_cost_simulation_for_project
+        from django.contrib import messages
+        import json
+
+        period = request.POST.get("period", "CURRENT_MONTH")
+        start_date_str = request.POST.get("start_date")
+        end_date_str = request.POST.get("end_date")
+
+        action_types = request.POST.getlist("action_type[]")
+        services = request.POST.getlist("service[]")
+        currencies = request.POST.getlist("currency[]")
+        values = request.POST.getlist("value[]")
+        recommendation_ids = request.POST.getlist("recommendation_id[]")
+
+        actions = []
+        for i in range(len(action_types)):
+            act_type = action_types[i]
+            if act_type == "RECOMMENDATION_SAVINGS":
+                rec_id = recommendation_ids[i] if i < len(recommendation_ids) else None
+                actions.append({
+                    "action_type": act_type,
+                    "recommendation_id": int(rec_id) if rec_id else None
+                })
+            else:
+                svc = services[i] if i < len(services) else ""
+                curr = currencies[i] if i < len(currencies) else ""
+                val_str = values[i] if i < len(values) else "0"
+                actions.append({
+                    "action_type": act_type,
+                    "service": svc,
+                    "currency": curr,
+                    "value": val_str
+                })
+
+        context = self.get_common_context(request)
+        context.update({
+            "period": period,
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "actions": actions,
+            "simulation_result": None,
+            "chart_data_json": None,
+            "active_project": self.active_project
+        })
+
+        try:
+            simulation_result = run_cost_simulation_for_project(
+                project=self.active_project,
+                period=period,
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+                actions=actions,
+                actor_user=request.user
+            )
+            
+            # Serialize chart data using float format specifically for Chart.js presentation
+            chart_data = {}
+            for curr, res in simulation_result["currency_results"].items():
+                chart_data[curr] = {
+                    "currency": curr,
+                    "baseline": float(res["baseline_cost"]),
+                    "simulated": float(res["simulated_cost"]),
+                    "difference": float(res["absolute_change"]),
+                    "percentage": float(res["percentage_change"]) if res["percentage_change"] is not None else 0.0
+                }
+            
+            context.update({
+                "simulation_result": simulation_result,
+                "chart_data_json": json.dumps(chart_data)
+            })
+            messages.success(request, "Cost simulation completed successfully.")
+        except ValueError as e:
+            messages.error(request, f"Simulation Error: {str(e)}")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Unexpected error in CostSimulatorView: %s", e)
+            messages.error(
+                request,
+                "Unable to run the simulation. Please verify the simulation settings and try again."
+            )
+
+        return render(request, self.template_name, context)
+
+
+class ExecutiveReportView(ProjectPermissionRequiredMixin, View):
+    template_name = "analytics/report_builder.html"
+    required_capability = "VIEW_REPORTS"
+
+    def get(self, request, *args, **kwargs):
+        context = {
+            "period": "CURRENT_MONTH",
+            "start_date": "",
+            "end_date": "",
+            "enabled_sections": ["cost_breakdown", "anomalies", "waste", "recommendations", "forecast"],
+            "active_project": self.active_project
+        }
+        return render(request, self.template_name, context)
+
+    def post(self, request, *args, **kwargs):
+        from analytics.services.report_service import collect_report_data_for_project
+        from analytics.services.pdf_report_generator import generate_pdf_report
+        from django.contrib import messages
+        from django.http import FileResponse
+        import io
+
+        period = request.POST.get("period", "CURRENT_MONTH")
+        start_date_str = request.POST.get("start_date")
+        end_date_str = request.POST.get("end_date")
+
+        # Validate sections against strict server-side allowlist
+        ALLOWED_SECTIONS = {"cost_breakdown", "anomalies", "waste", "recommendations", "forecast"}
+        sections_input = request.POST.getlist("sections[]")
+        enabled_sections = [s for s in sections_input if s in ALLOWED_SECTIONS]
+
+        try:
+            report_data = collect_report_data_for_project(
+                project=self.active_project,
+                period=period,
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+                enabled_sections=enabled_sections
+            )
+            
+            pdf_bytes = generate_pdf_report(report_data)
+            
+            response = FileResponse(io.BytesIO(pdf_bytes), content_type="application/pdf")
+            filename = f"cloudcost-executive-report-{report_data['start_date']}-to-{report_data['end_date']}.pdf"
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+            
+        except ValueError as e:
+            messages.error(request, str(e))
+            context = {
+                "period": period,
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "enabled_sections": enabled_sections,
+                "active_project": self.active_project
+            }
+            return render(request, self.template_name, context)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Unexpected error in ExecutiveReportView: %s", e)
+            messages.error(
+                request,
+                "Unable to generate the report. Please verify the report settings and try again."
+            )
+            context = {
+                "period": period,
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "enabled_sections": enabled_sections,
+                "active_project": self.active_project
+            }
+            return render(request, self.template_name, context)
+
+
 
 

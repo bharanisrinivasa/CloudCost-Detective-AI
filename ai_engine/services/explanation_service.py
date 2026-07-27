@@ -202,13 +202,17 @@ def calculate_input_hash(finding_data: dict) -> str:
 # --- SERVICE ENTRY POINT ---
 def get_or_generate_explanation(user, source, force_regenerate: bool = False) -> AIExplanation:
     """
+    Backward compatibility wrapper for user-based explanation generation.
+    """
+    project = getattr(source, "project", None)
+    if not project and user:
+        from accounts.models import Project
+        project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_or_generate_explanation_for_project(project, source, force_regenerate, actor_user=user)
+
+def get_or_generate_explanation_for_project(project, source, force_regenerate: bool = False, actor_user=None) -> AIExplanation:
+    """
     Coordinates explanation generation.
-    1. Computes the deterministic hash of the finding.
-    2. Checks for an existing explanation record.
-    3. If not stale and force_regenerate is False, returns the cached explanation.
-    4. Otherwise, requests a new structured explanation from the provider.
-    5. Performs grounding validation.
-    6. Stores/updates the result in the database.
     """
     source_class = source.__class__.__name__
     if source_class == "CostAnomaly":
@@ -222,9 +226,9 @@ def get_or_generate_explanation(user, source, force_regenerate: bool = False) ->
 
     current_hash = calculate_input_hash(finding_data)
 
-    # Scoping: query by user + source_type + source_id
+    # Scoping: query by project + source_type + source_id
     explanation_record = AIExplanation.objects.filter(
-        user=user,
+        project=project,
         source_type=source_type,
         source_id=source.pk
     ).first()
@@ -238,7 +242,8 @@ def get_or_generate_explanation(user, source, force_regenerate: bool = False) ->
     # Create placeholder record if it doesn't exist
     if not explanation_record:
         explanation_record = AIExplanation(
-            user=user,
+            project=project,
+            user=actor_user,
             source_type=source_type,
             source_id=source.pk,
             prompt_version=PROMPT_VERSION,
@@ -313,6 +318,16 @@ def get_or_generate_explanation(user, source, force_regenerate: bool = False) ->
 
 
 def get_or_generate_recommendation_explanation(user, rec, force_regenerate: bool = False) -> dict:
+    """
+    Backward compatibility wrapper for user-based recommendation explanation generation.
+    """
+    project = getattr(rec, "project", None)
+    if not project and user:
+        from accounts.models import Project
+        project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_or_generate_recommendation_explanation_for_project(project, rec, force_regenerate, actor_user=user)
+
+def get_or_generate_recommendation_explanation_for_project(project, rec, force_regenerate: bool = False, actor_user=None) -> dict:
     """
     Coordinates explanation generation for recommendations.
     Uses structured responses from the Gemini API and caching mechanisms.

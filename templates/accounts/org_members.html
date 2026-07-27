@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}Team Members - CloudCost Detective AI{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row mb-5">
+        <div class="col-12">
+            <h1 class="fw-bold mb-2"><i class="fa-solid fa-users text-info me-2"></i>Team Member Management</h1>
+            <p class="text-secondary">Manage access control and roles for organization <strong class="text-light">{{ organization.name }}</strong> (Project: <strong class="text-light">{{ active_project.name }}</strong>).</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Members List -->
+        <div class="col-lg-8 mb-4 mb-lg-0">
+            <div class="card glass-card p-4 border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h3 class="fw-bold mb-4"><i class="fa-solid fa-user-shield me-2 text-info"></i>Active Members</h3>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle border-secondary border-opacity-25">
+                            <thead>
+                                <tr class="text-secondary">
+                                    <th scope="col">User</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Role</th>
+                                    {% if can_manage %}
+                                        <th scope="col" class="text-end">Actions</th>
+                                    {% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for m in members %}
+                                    <tr>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="avatar-placeholder me-2 bg-secondary text-light rounded-circle d-flex align-items-center justify-content-center" style="width: 32px; height: 32px; font-weight: bold;">
+                                                    {{ m.user.username|slice:":1"|upper }}
+                                                </div>
+                                                <div>
+                                                    <span class="fw-bold text-light">{{ m.user.username }}</span>
+                                                    {% if m.user == user %}
+                                                        <span class="badge bg-info ms-1">You</span>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>{{ m.user.email }}</td>
+                                        <td>
+                                            {% if can_manage and m.user != user %}
+                                                <!-- Role Update Form -->
+                                                <form method="POST" action="{% url 'accounts:update-member-role' m.id %}" class="d-inline-block">
+                                                    {% csrf_token %}
+                                                    <select name="role" class="form-select form-select-sm bg-dark text-light border-secondary" onchange="this.form.submit()">
+                                                        {% for r in roles %}
+                                                            <option value="{{ r }}" {% if m.role == r %}selected{% endif %}>{{ r }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </form>
+                                            {% else %}
+                                                <span class="badge bg-secondary-custom px-3 py-1.5">{{ m.get_role_display }}</span>
+                                            {% endif %}
+                                        </td>
+                                        {% if can_manage %}
+                                            <td class="text-end">
+                                                {% if m.user != user %}
+                                                    <form method="POST" action="{% url 'accounts:remove-member' m.id %}" class="d-inline" onsubmit="return confirm('Are you sure you want to remove {{ m.user.username }} from the organization?');">
+                                                        {% csrf_token %}
+                                                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                                                            <i class="fa-solid fa-user-minus"></i> Remove
+                                                        </button>
+                                                    </form>
+                                                {% endif %}
+                                            </td>
+                                        {% endif %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Member Card -->
+        <div class="col-lg-4">
+            <div class="card glass-card p-4 border-0 shadow-sm">
+                <div class="card-body">
+                    <h3 class="fw-bold mb-4"><i class="fa-solid fa-user-plus text-info me-2"></i>Add Member</h3>
+                    
+                    {% if can_manage %}
+                        <form method="POST">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label for="email" class="form-label">Email Address</label>
+                                <input type="email" name="email" id="email" class="form-control bg-dark text-light border-secondary" placeholder="user@example.com" required>
+                                <div class="form-text text-secondary text-sm">User must have an existing CloudCost Detective registered account.</div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label for="role" class="form-label">Role</label>
+                                <select name="role" id="role" class="form-select bg-dark text-light border-secondary">
+                                    <option value="VIEWER">Viewer</option>
+                                    <option value="ANALYST">Analyst</option>
+                                    <option value="ADMIN">Admin</option>
+                                    <option value="OWNER">Owner</option>
+                                </select>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary-glow w-100">Add Team Member</button>
+                        </form>
+                    {% else %}
+                        <div class="alert alert-warning border-0" role="alert">
+                            <i class="fa-solid fa-circle-exclamation me-1"></i> You do not have permission to manage members. Only Owners and Admins can add members.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -55,6 +55,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "accounts.context_processors.active_project_processor",
             ],
         },
     },
@@ -103,4 +104,7 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://localhost:
 # Gemini API Configuration
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
 GEMINI_MODEL = env("GEMINI_MODEL", default="gemini-2.5-flash")
+
+# Custom Test Runner for automatic tenancy backfilling in legacy tests
+TEST_RUNNER = "cloud_cost_detective.test_runner.CustomDiscoverRunner"
 

@@ -58,7 +58,22 @@ def resolve_time_range(time_range_type: str, custom_start: Optional[str] = None,
     return None, None
 
 def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
-    """Executes the query plan deterministically using Django ORM and returns serializable data."""
+    """
+    DEPRECATED: Backward compatibility wrapper for user-based query execution.
+    Use execute_query_plan_for_project instead.
+    """
+    import warnings
+    warnings.warn(
+        "execute_query_plan is deprecated. Use execute_query_plan_for_project instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return execute_query_plan_for_project(project, user, plan)
+
+def execute_query_plan_for_project(project, user, plan: ChatQueryPlan) -> dict:
+    """Executes the query plan deterministically using Django ORM scoped to a project and returns serializable data."""
     intent = plan.intent
 
     # Fetch boundaries
@@ -68,8 +83,11 @@ def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
         plan.time_range.end_date
     )
 
-    # Base query for user data isolation
-    records = BillingRecord.objects.filter(upload__uploaded_by=user)
+    if not project:
+        return {"results": []}
+
+    # Base query for project data isolation
+    records = BillingRecord.objects.filter(upload__project=project)
 
     if start:
         records = records.filter(usage_start__date__gte=start)
@@ -211,7 +229,7 @@ def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
 
     # 7. ANOMALIES
     elif intent == IntentEnum.ANOMALIES:
-        qs = CostAnomaly.objects.filter(user=user)
+        qs = CostAnomaly.objects.filter(project=project)
         if start:
             qs = qs.filter(detected_date__gte=start)
         if end:
@@ -242,7 +260,7 @@ def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
 
     # 8. WASTE_FINDINGS
     elif intent == IntentEnum.WASTE_FINDINGS:
-        qs = WasteFinding.objects.filter(user=user)
+        qs = WasteFinding.objects.filter(project=project)
         if plan.filters.waste_type:
             qs = qs.filter(waste_type=plan.filters.waste_type)
         if plan.filters.waste_confidence:
@@ -272,7 +290,7 @@ def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
 
     # 9. POTENTIAL_SAVINGS
     elif intent == IntentEnum.POTENTIAL_SAVINGS:
-        qs = WasteFinding.objects.filter(user=user)
+        qs = WasteFinding.objects.filter(project=project)
         if plan.filters.waste_status:
             qs = qs.filter(status=plan.filters.waste_status)
         else:
@@ -349,7 +367,7 @@ def execute_query_plan(user, plan: ChatQueryPlan) -> dict:
             
             comparison_is_equivalent_duration = (end_curr - start_curr).days == (end_prev - start_prev).days
 
-        base_records = BillingRecord.objects.filter(upload__uploaded_by=user)
+        base_records = BillingRecord.objects.filter(upload__project=project)
         if plan.filters.service:
             base_records = base_records.filter(service=plan.filters.service)
         if plan.filters.region:

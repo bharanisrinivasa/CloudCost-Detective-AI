@@ -75,10 +75,26 @@ def get_single_upload_for_date(date_val, records_qs):
 
 def run_anomaly_detection_for_user(user):
     """
-    Run synchronous anomaly detection scans for a user.
+    Backward compatibility wrapper for user-based scans.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return run_anomaly_detection_for_project(project, actor_user=user)
+
+def run_anomaly_detection_for_project(project, actor_user=None):
+    """
+    Run synchronous anomaly detection scans for a project.
     Calculates historical baselines dynamically to prevent look-ahead bias.
     """
-    records = BillingRecord.objects.filter(upload__uploaded_by=user).exclude(usage_start__isnull=True)
+    if not project:
+        return {
+            'created': 0,
+            'skipped': 0,
+            'updated': 0,
+            'message': 'No project specified for anomaly detection.'
+        }
+
+    records = BillingRecord.objects.filter(upload__project=project).exclude(usage_start__isnull=True)
     
     # Get sorted list of distinct dates
     db_dates = list(
@@ -138,7 +154,7 @@ def run_anomaly_detection_for_user(user):
                 
                 # Deduplicate or update
                 anomaly_qs = CostAnomaly.objects.filter(
-                    user=user,
+                    project=project,
                     anomaly_type="DAILY_SPIKE",
                     detected_date=d_i,
                     service_name="",
@@ -155,13 +171,15 @@ def run_anomaly_detection_for_user(user):
                         anomaly.severity = sev
                         anomaly.description = desc
                         anomaly.billing_upload_id = upload_id
+                        anomaly.user = actor_user
                         anomaly.save()
                         results['updated'] += 1
                     else:
                         results['skipped'] += 1
                 else:
                     CostAnomaly.objects.create(
-                        user=user,
+                        project=project,
+                        user=actor_user,
                         anomaly_type="DAILY_SPIKE",
                         detected_date=d_i,
                         service_name="",
@@ -177,7 +195,7 @@ def run_anomaly_detection_for_user(user):
                         status="OPEN"
                     )
                     results['created'] += 1
-
+ 
     # --- 2. SERVICE SPIKE ANOMALY DETECTION ---
     services = list(records.values_list('service', flat=True).distinct())
     normalized_services = []
@@ -244,7 +262,7 @@ def run_anomaly_detection_for_user(user):
                     desc = f"Service '{svc}' cost of {actual_cost:.2f} was {deviation_pct:.1f}% above historical baseline average of {mean:.2f}."
                     
                     anomaly_qs = CostAnomaly.objects.filter(
-                        user=user,
+                        project=project,
                         anomaly_type="SERVICE_SPIKE",
                         detected_date=d_j,
                         service_name=svc,
@@ -262,13 +280,15 @@ def run_anomaly_detection_for_user(user):
                             anomaly.region = reg_val
                             anomaly.description = desc
                             anomaly.billing_upload_id = upload_id
+                            anomaly.user = actor_user
                             anomaly.save()
                             results['updated'] += 1
                         else:
                             results['skipped'] += 1
                     else:
                         CostAnomaly.objects.create(
-                            user=user,
+                            project=project,
+                            user=actor_user,
                             anomaly_type="SERVICE_SPIKE",
                             detected_date=d_j,
                             service_name=svc,
@@ -285,7 +305,7 @@ def run_anomaly_detection_for_user(user):
                             status="OPEN"
                         )
                         results['created'] += 1
-
+ 
     # --- 3. RESOURCE SPIKE ANOMALY DETECTION ---
     raw_resources = list(records.values('resource_id', 'resource_name').distinct())
     
@@ -359,7 +379,7 @@ def run_anomaly_detection_for_user(user):
                     desc = f"Resource '{display_name}' cost of {actual_cost:.2f} was {deviation_pct:.1f}% above historical baseline average of {mean:.2f}."
                     
                     anomaly_qs = CostAnomaly.objects.filter(
-                        user=user,
+                        project=project,
                         anomaly_type="RESOURCE_SPIKE",
                         detected_date=d_k,
                         service_name=svc_val,
@@ -377,13 +397,15 @@ def run_anomaly_detection_for_user(user):
                             anomaly.region = reg_val
                             anomaly.description = desc
                             anomaly.billing_upload_id = upload_id
+                            anomaly.user = actor_user
                             anomaly.save()
                             results['updated'] += 1
                         else:
                             results['skipped'] += 1
                     else:
                         CostAnomaly.objects.create(
-                            user=user,
+                            project=project,
+                            user=actor_user,
                             anomaly_type="RESOURCE_SPIKE",
                             detected_date=d_k,
                             service_name=svc_val,
@@ -400,7 +422,7 @@ def run_anomaly_detection_for_user(user):
                             status="OPEN"
                         )
                         results['created'] += 1
-
+ 
     # --- 4. UNUSUAL GROWTH ANOMALY DETECTION ---
     for i in range(MIN_HISTORY_DAYS, len(db_dates)):
         d_i = db_dates[i]
@@ -421,7 +443,7 @@ def run_anomaly_detection_for_user(user):
                 desc = f"Day-over-day cost increased by {absolute_increase:.2f} ({growth_pct:.1f}% growth) from {previous_cost:.2f} to {current_cost:.2f}."
                 
                 anomaly_qs = CostAnomaly.objects.filter(
-                    user=user,
+                    project=project,
                     anomaly_type="UNUSUAL_GROWTH",
                     detected_date=d_i,
                     service_name="",
@@ -438,13 +460,15 @@ def run_anomaly_detection_for_user(user):
                         anomaly.severity = sev
                         anomaly.description = desc
                         anomaly.billing_upload_id = upload_id
+                        anomaly.user = actor_user
                         anomaly.save()
                         results['updated'] += 1
                     else:
                         results['skipped'] += 1
                 else:
                     CostAnomaly.objects.create(
-                        user=user,
+                        project=project,
+                        user=actor_user,
                         anomaly_type="UNUSUAL_GROWTH",
                         detected_date=d_i,
                         service_name="",
@@ -460,5 +484,5 @@ def run_anomaly_detection_for_user(user):
                         status="OPEN"
                     )
                     results['created'] += 1
-
+ 
     return results

@@ -26,6 +26,13 @@ class CostAnomaly(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="cost_anomalies",
+        null=True,
+        blank=True
+    )
+    project = models.ForeignKey(
+        "accounts.Project",
+        on_delete=models.CASCADE,
         related_name="cost_anomalies"
     )
     
@@ -59,14 +66,14 @@ class CostAnomaly(models.Model):
     
     class Meta:
         indexes = [
-            models.Index(fields=["user", "detected_date"]),
-            models.Index(fields=["user", "severity"]),
-            models.Index(fields=["user", "status"]),
+            models.Index(fields=["project", "detected_date"]),
+            models.Index(fields=["project", "severity"]),
+            models.Index(fields=["project", "status"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "anomaly_type", "detected_date", "service_name", "resource_id", "resource_name"],
-                name="unique_user_anomaly_event"
+                fields=["project", "anomaly_type", "detected_date", "service_name", "resource_id", "resource_name"],
+                name="unique_project_anomaly_event"
             )
         ]
 
@@ -92,6 +99,15 @@ class CostAnomaly(models.Model):
     def __str__(self) -> str:
         return f"{self.get_anomaly_type_display()} on {self.detected_date} ({self.severity})"
 
+    def save(self, *args, **kwargs):
+        if not hasattr(self, 'project') or self.project_id is None:
+            if self.user:
+                from accounts.models import Project
+                project = Project.objects.filter(organization__memberships__user=self.user).first()
+                if project:
+                    self.project = project
+        super().save(*args, **kwargs)
+
 
 class WasteFinding(models.Model):
     STATUS_CHOICES = (
@@ -113,6 +129,13 @@ class WasteFinding(models.Model):
     
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="waste_findings",
+        null=True,
+        blank=True
+    )
+    project = models.ForeignKey(
+        "accounts.Project",
         on_delete=models.CASCADE,
         related_name="waste_findings"
     )
@@ -144,13 +167,13 @@ class WasteFinding(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["user", "status"]),
-            models.Index(fields=["user", "waste_type"]),
+            models.Index(fields=["project", "status"]),
+            models.Index(fields=["project", "waste_type"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "waste_type", "resource_key", "service_name", "currency"],
-                name="unique_user_waste_event"
+                fields=["project", "waste_type", "resource_key", "service_name", "currency"],
+                name="unique_project_waste_event"
             )
         ]
 
@@ -171,4 +194,13 @@ class WasteFinding(models.Model):
 
     def __str__(self) -> str:
         return f"{self.waste_type} - {self.resource_name or self.resource_id} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not hasattr(self, 'project') or self.project_id is None:
+            if self.user:
+                from accounts.models import Project
+                project = Project.objects.filter(organization__memberships__user=self.user).first()
+                if project:
+                    self.project = project
+        super().save(*args, **kwargs)
 

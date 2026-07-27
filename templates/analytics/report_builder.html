@@ -1,0 +1,201 @@
+{% extends 'base.html' %}
+
+{% block title %}Executive Reports - CloudCost Detective AI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .glass-card {
+        background: rgba(30, 41, 59, 0.4);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+    }
+    .form-control-custom {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-primary) !important;
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        transition: var(--transition-smooth);
+    }
+    .form-control-custom:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--accent-color);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    .form-control-custom option {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    .checkbox-custom {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 0.8rem 1rem;
+        transition: var(--transition-smooth);
+        cursor: pointer;
+    }
+    .checkbox-custom:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(56, 189, 248, 0.3);
+    }
+    .checkbox-custom input[type="checkbox"] {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+        <div>
+            <span class="text-info fw-bold text-uppercase tracking-wider text-xs">FinOps PDF Engine</span>
+            <h1 class="fw-bold mt-1 mb-0">Executive PDF Reports</h1>
+        </div>
+        <div class="mt-3 mt-md-0">
+            <a href="{% url 'dashboard-home' %}" class="btn btn-secondary-custom btn-sm">
+                <i class="fa-solid fa-arrow-left me-2"></i>Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Alert / Message Display -->
+    {% if messages %}
+    <div class="messages mb-4">
+        {% for msg in messages %}
+        <div class="alert {% if msg.tags == 'success' %}alert-success{% else %}alert-danger{% endif %} alert-dismissible fade show border-0 shadow-sm" role="alert" style="background: {% if msg.tags == 'success' %}rgba(34, 197, 94, 0.15){% else %}rgba(239, 68, 68, 0.15){% endif %}; color: {% if msg.tags == 'success' %}#4ade80{% else %}#f87171{% endif %}; border-left: 4px solid {% if msg.tags == 'success' %}#22c55e{% else %}#ef4444{% endif %} !important;">
+            <div class="d-flex align-items-center">
+                <i class="fa-solid {% if msg.tags == 'success' %}fa-circle-check{% else %}fa-circle-exclamation{% endif %} me-2 fs-5"></i>
+                <div>{{ msg }}</div>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="row g-4 justify-content-center">
+        <div class="col-lg-8">
+            <div class="card glass-card p-4">
+                <h4 class="fw-bold text-white mb-3"><i class="fa-solid fa-sliders text-info me-2"></i>Configure Report Layout</h4>
+                <p class="text-secondary text-sm mb-4">
+                    Generate a management-ready PDF cloud cost and optimization report using your uploaded OCI billing data, detected anomalies, waste findings, recommendations, and trend forecasts.
+                </p>
+
+                <form id="reportForm" method="POST" action="{% url 'cost-report' %}">
+                    {% csrf_token %}
+
+                    <!-- Period Selection -->
+                    <div class="mb-4">
+                        <label class="form-label text-secondary fw-semibold">Reporting Date Range</label>
+                        <select name="period" id="periodSelect" class="form-select form-control-custom" onchange="toggleCustomDates()">
+                            <option value="CURRENT_MONTH" {% if period == "CURRENT_MONTH" %}selected{% endif %}>Current Month</option>
+                            <option value="LAST_MONTH" {% if period == "LAST_MONTH" %}selected{% endif %}>Last Month</option>
+                            <option value="LAST_30_DAYS" {% if period == "LAST_30_DAYS" %}selected{% endif %}>Last 30 Days</option>
+                            <option value="CUSTOM" {% if period == "CUSTOM" %}selected{% endif %}>Custom Period</option>
+                        </select>
+                    </div>
+
+                    <!-- Custom Dates Input -->
+                    <div class="row g-3 mb-4 d-none" id="customDateRow">
+                        <div class="col-6">
+                            <label class="form-label text-secondary text-sm">Start Date</label>
+                            <input type="date" name="start_date" id="startDateInput" class="form-control form-control-custom" value="{{ start_date }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-secondary text-sm">End Date</label>
+                            <input type="date" name="end_date" id="endDateInput" class="form-control form-control-custom" value="{{ end_date }}">
+                        </div>
+                    </div>
+
+                    <!-- Optional Section Checklist -->
+                    <div class="mb-4">
+                        <label class="form-label text-secondary fw-semibold mb-3">Optional Sections to Include</label>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="checkbox-custom d-flex align-items-center w-100 mb-0">
+                                    <input type="checkbox" name="sections[]" value="cost_breakdown" class="form-check-input me-3 mt-0" {% if "cost_breakdown" in enabled_sections %}checked{% endif %}>
+                                    <div>
+                                        <span class="text-white fw-bold text-sm d-block">Cost Breakdowns</span>
+                                        <span class="text-secondary text-xs">Cost by Service, Region, and Top Resources</span>
+                                    </div>
+                                </label>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="checkbox-custom d-flex align-items-center w-100 mb-0">
+                                    <input type="checkbox" name="sections[]" value="anomalies" class="form-check-input me-3 mt-0" {% if "anomalies" in enabled_sections %}checked{% endif %}>
+                                    <div>
+                                        <span class="text-white fw-bold text-sm d-block">Cost Anomalies</span>
+                                        <span class="text-secondary text-xs">Detailed table of detected OCI spend spikes</span>
+                                    </div>
+                                </label>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="checkbox-custom d-flex align-items-center w-100 mb-0">
+                                    <input type="checkbox" name="sections[]" value="waste" class="form-check-input me-3 mt-0" {% if "waste" in enabled_sections %}checked{% endif %}>
+                                    <div>
+                                        <span class="text-white fw-bold text-sm d-block">Waste Findings</span>
+                                        <span class="text-secondary text-xs">Dormant and stale cost optimization targets</span>
+                                    </div>
+                                </label>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="checkbox-custom d-flex align-items-center w-100 mb-0">
+                                    <input type="checkbox" name="sections[]" value="recommendations" class="form-check-input me-3 mt-0" {% if "recommendations" in enabled_sections %}checked{% endif %}>
+                                    <div>
+                                        <span class="text-white fw-bold text-sm d-block">Savings Recommendations</span>
+                                        <span class="text-secondary text-xs">Optimization action strategies and savings deduplication</span>
+                                    </div>
+                                </label>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="checkbox-custom d-flex align-items-center w-100 mb-0">
+                                    <input type="checkbox" name="sections[]" value="forecast" class="form-check-input me-3 mt-0" {% if "forecast" in enabled_sections %}checked{% endif %}>
+                                    <div>
+                                        <span class="text-white fw-bold text-sm d-block">Monthly Cost Forecast</span>
+                                        <span class="text-secondary text-xs">OLS spend regression and coverage metrics</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-secondary text-xs">
+                            <i class="fa-solid fa-circle-info me-1 text-info"></i>
+                            Executive Summary and Data Quality & Limitations are mandatory and will always be included.
+                        </div>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <button type="submit" class="btn btn-primary-glow w-100 py-3 fw-bold fs-5" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border-color: #6366f1;">
+                        <i class="fa-solid fa-file-pdf me-2"></i>Generate PDF Report
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function toggleCustomDates() {
+        const period = document.getElementById("periodSelect").value;
+        const row = document.getElementById("customDateRow");
+        if (period === "CUSTOM") {
+            row.classList.remove("d-none");
+            document.getElementById("startDateInput").required = true;
+            document.getElementById("endDateInput").required = true;
+        } else {
+            row.classList.add("d-none");
+            document.getElementById("startDateInput").required = false;
+            document.getElementById("endDateInput").required = false;
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        toggleCustomDates();
+    });
+</script>
+{% endblock %}

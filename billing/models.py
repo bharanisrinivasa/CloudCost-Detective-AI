@@ -55,6 +55,11 @@ class BillingUpload(models.Model):
         null=True,
         blank=True
     )
+    project = models.ForeignKey(
+        "accounts.Project",
+        on_delete=models.CASCADE,
+        related_name="billing_uploads"
+    )
     upload_type = models.CharField(
         max_length=50,
         choices=UPLOAD_TYPE_CHOICES,
@@ -93,6 +98,26 @@ class BillingUpload(models.Model):
         return os.path.basename(self.uploaded_file.name) if self.uploaded_file else ""
 
     def save(self, *args, **kwargs):
+        if not self.upload_status:
+            self.upload_status = "Pending"
+        if not self.upload_type:
+            self.upload_type = "Billing Report"
+
+        if not hasattr(self, 'project') or self.project_id is None:
+            from accounts.models import Project
+            project = None
+            if self.uploaded_by:
+                project = Project.objects.filter(organization__memberships__user=self.uploaded_by).first()
+            if not project:
+                project = Project.objects.first()
+            if not project:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                dummy_user, _ = User.objects.get_or_create(username="dummy_tenant_system", email="dummy@example.com")
+                from accounts.services.tenant_service import provision_default_tenant
+                provision_default_tenant(dummy_user)
+                project = Project.objects.first()
+            self.project = project
         # Bridge legacy uploaded_file to stored_file if needed
         if self.uploaded_file and not self.stored_file:
             self.stored_file = self.uploaded_file

@@ -41,10 +41,26 @@ def calculate_std_dev(values, mean):
 
 def run_waste_detection_for_user(user):
     """
-    Synchronously scan user's BillingRecord database entries for potential waste.
+    Backward compatibility wrapper for user-based scans.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return run_waste_detection_for_project(project, actor_user=user)
+
+def run_waste_detection_for_project(project, actor_user=None):
+    """
+    Synchronously scan project's BillingRecord database entries for potential waste.
     Saves or updates findings in a secure, idempotent manner.
     """
-    records = BillingRecord.objects.filter(upload__uploaded_by=user).exclude(usage_start__isnull=True)
+    if not project:
+        return {
+            'created': 0,
+            'updated': 0,
+            'analyzed': 0,
+            'potential_savings': {}
+        }
+
+    records = BillingRecord.objects.filter(upload__project=project).exclude(usage_start__isnull=True)
     
     # Aggregate daily cost and usage per resource in the database to prevent loading raw millions
     resource_daily_qs = (
@@ -321,12 +337,13 @@ def run_waste_detection_for_user(user):
         # Insert or update findings
         for fd in findings_to_check:
             finding, created = WasteFinding.objects.update_or_create(
-                user=user,
+                project=project,
                 waste_type=fd['type'],
                 resource_key=r_key,
                 service_name=service_name,
                 currency=currency,
                 defaults={
+                    'user': actor_user,
                     'resource_id': r_id,
                     'resource_name': r_name,  # Updated latest name if changed
                     'region': region,

@@ -21,4 +21,10 @@ urlpatterns = [
     
     # Forecasting Routes
     path("forecast/", views.ForecastView.as_view(), name="cost-forecast"),
+    
+    # What-if Simulator Routes
+    path("simulator/", views.CostSimulatorView.as_view(), name="cost-simulator"),
+    
+    # Executive PDF Report Routes
+    path("reports/", views.ExecutiveReportView.as_view(), name="cost-report"),
 ]

@@ -817,7 +817,7 @@ class ChatTestCase(TestCase):
 
         # 2. Query executor raises exception unexpectedly
         with patch("ai_engine.services.chat.chat_service.plan_chat_query") as mock_plan, \
-             patch("ai_engine.services.chat.chat_service.execute_query_plan") as mock_exec, \
+             patch("ai_engine.services.chat.chat_service.execute_query_plan_for_project") as mock_exec, \
              patch("ai_engine.services.chat.chat_service.build_grounded_response") as mock_resp:
             
             mock_plan.return_value = ChatQueryPlan(

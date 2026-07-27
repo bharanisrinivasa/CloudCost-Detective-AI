@@ -5,12 +5,32 @@ from billing.models import BillingRecord, BillingUpload
 
 def get_dashboard_metrics(user, filters):
     """
-    Calculate cost metrics from the database for the authenticated user,
+    Backward compatibility wrapper for user-based dashboard metrics calculation.
+    """
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_dashboard_metrics_for_project(project, filters)
+
+def get_dashboard_metrics_for_project(project, filters):
+    """
+    Calculate cost metrics from the database for the authenticated project,
     applying optional date range, service, and region filters.
     """
-    # 1. Base querysets for user isolation
-    base_records = BillingRecord.objects.filter(upload__uploaded_by=user)
-    total_uploads = BillingUpload.objects.filter(uploaded_by=user).count()
+    if not project:
+        return {
+            'has_any_data': False,
+            'total_uploads': 0,
+            'available_services': [],
+            'available_regions': [],
+            'total_cost': 0.00,
+            'total_resources': 0,
+            'currency': 'USD',
+            'has_multiple_currencies': False,
+            'monthly_trend': []
+        }
+    # 1. Base querysets for project isolation
+    base_records = BillingRecord.objects.filter(upload__project=project)
+    total_uploads = BillingUpload.objects.filter(project=project).count()
     has_any_data = base_records.exists()
     
     # 2. Available filter options from UNFILTERED base records (user-specific)

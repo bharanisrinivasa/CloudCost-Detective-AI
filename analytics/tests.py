@@ -1435,3 +1435,1188 @@ class ForecastingTests(TestCase):
         self.assertFalse(res_blank["UNKNOWN"]["forecast_available"])
 
 
+class SimulatorTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(username="simusera", email="s1@example.com", password="password123")
+        self.user_b = User.objects.create_user(username="simuserb", email="s2@example.com", password="password123")
+
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            upload_type="Billing Report",
+            original_filename="user_a_billing.csv"
+        )
+        self.upload_b = BillingUpload.objects.create(
+            uploaded_by=self.user_b,
+            upload_type="Billing Report",
+            original_filename="user_b_billing.csv"
+        )
+
+        # Baseline: USD Compute 100.00, EUR Database 50.00
+        # Let's use middle of last month to make sure it's completed
+        from django.utils import timezone
+        today = timezone.localdate()
+        first_of_this_month = today.replace(day=1)
+        self.last_month_date = first_of_this_month - datetime.timedelta(days=15)
+
+        self.r_usd = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="comp-usd",
+            cost=Decimal("100.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        self.r_eur = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Database",
+            resource_id="db-eur",
+            cost=Decimal("50.00"),
+            currency="EUR",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+
+        # Recommendation for User A:
+        from ai_engine.models import Recommendation
+        self.rec_a = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            service_name="Compute",
+            estimated_monthly_savings=Decimal("15.00"),
+            currency="USD",
+            fingerprint="fingerprint_rec_a"
+        )
+
+        # Recommendation for User B:
+        self.rec_b = Recommendation.objects.create(
+            user=self.user_b,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            service_name="Compute",
+            estimated_monthly_savings=Decimal("20.00"),
+            currency="USD",
+            fingerprint="fingerprint_rec_b"
+        )
+
+    def test_validation_percentage_limits(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+
+        # Percentage below 0
+        actions_neg = [{"action_type": "PERCENT_DECREASE", "service": "Compute", "value": "-5"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_neg)
+
+        # Percentage above 1000
+        actions_high = [{"action_type": "PERCENT_INCREASE", "service": "Compute", "value": "1001"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_high)
+
+    def test_validation_fixed_amount_limits(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+
+        # Fixed amount below 0
+        actions_neg = [{"action_type": "FIXED_DECREASE", "service": "Compute", "currency": "USD", "value": "-10"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_neg)
+
+        # Fixed amount above 10000000
+        actions_high = [{"action_type": "FIXED_INCREASE", "service": "Compute", "currency": "USD", "value": "10000001"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_high)
+
+    def test_invalid_action_type(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+        actions = [{"action_type": "INVALID_TYPE", "service": "Compute", "value": "10"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions)
+
+    def test_malformed_custom_dates(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "Compute", "value": "20"}]
+
+        # Malformed custom start date
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "CUSTOM", start_date_str="2026/06/01", end_date_str="2026-06-30", actions=actions)
+
+        # Malformed custom end date
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "CUSTOM", start_date_str="2026-06-01", end_date_str="30-06-2026", actions=actions)
+
+        # Missing custom dates
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "CUSTOM", actions=actions)
+
+        # start_date > end_date
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "CUSTOM", start_date_str="2026-07-01", end_date_str="2026-06-30", actions=actions)
+
+    def test_empty_scenario_and_missing_billing_records(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+        
+        # Empty scenario
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=[])
+
+        # Selected period has no billing records
+        # Let's search far in the future
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "Compute", "value": "20"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "CUSTOM", start_date_str="2035-01-01", end_date_str="2035-01-31", actions=actions)
+
+    def test_service_and_currency_validation(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+
+        # Unavailable/foreign service
+        actions_svc = [{"action_type": "PERCENT_DECREASE", "service": "ForeignService", "value": "20"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_svc)
+
+        # Invalid currency for targeted service
+        # Compute exists in USD, but not in EUR for this user in LAST_MONTH
+        actions_curr = [{"action_type": "FIXED_DECREASE", "service": "Compute", "currency": "EUR", "value": "10"}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_curr)
+
+    def test_blank_metadata_normalization(self):
+        # Create a record with blank service and currency
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="",
+            resource_id="blank-resource",
+            cost=Decimal("30.00"),
+            currency="",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        from analytics.services.cost_simulator import run_cost_simulation
+        
+        # Blank service/currency should match target "Unknown Service" / "UNKNOWN"
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "Unknown Service", "currency": "UNKNOWN", "value": "50"}]
+        res = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions)
+        
+        self.assertIn("UNKNOWN", res["currency_results"])
+        unk_res = res["currency_results"]["UNKNOWN"]
+        # Baseline = 30.00, Decreased by 50% = 15.00
+        self.assertEqual(unk_res["baseline_cost"], Decimal("30.00"))
+        self.assertEqual(unk_res["simulated_cost"], Decimal("15.00"))
+        self.assertEqual(unk_res["absolute_change"], Decimal("-15.00"))
+
+    def test_zero_baseline_percentage_handling(self):
+        # We need a user with baseline 0.00 but with billing records in that period
+        # Create a record with cost 0.00 in USD
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="ZeroSvc",
+            resource_id="zero-res",
+            cost=Decimal("0.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        from analytics.services.cost_simulator import run_cost_simulation
+        
+        # Now run action on ZeroSvc which has 0.00 baseline
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "ZeroSvc", "currency": "USD", "value": "20"}]
+        
+        # Delete non-zero records to force USD baseline to 0.00
+        BillingRecord.objects.filter(cost__gt=0).delete()
+        
+        res = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions)
+        usd_res = res["currency_results"]["USD"]
+        self.assertEqual(usd_res["baseline_cost"], Decimal("0.00"))
+        self.assertIsNone(usd_res["percentage_change"])
+        self.assertEqual(usd_res["percentage_change_reason"], "ZERO_BASELINE")
+
+    def test_explicit_conflict_checks(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+
+        # 1. Duplicate manual actions targeting same (service, currency)
+        actions_dup_manual = [
+            {"action_type": "PERCENT_DECREASE", "service": "Compute", "currency": "USD", "value": "10"},
+            {"action_type": "PERCENT_INCREASE", "service": "Compute", "currency": "USD", "value": "20"}
+        ]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_dup_manual)
+
+        # 2. Duplicate recommendation IDs
+        actions_dup_rec = [
+            {"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": self.rec_a.id},
+            {"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": self.rec_a.id}
+        ]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_dup_rec)
+
+        # 3. Manual action and recommendation action targeting same (service, currency)
+        actions_conflict = [
+            {"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": self.rec_a.id},
+            {"action_type": "PERCENT_DECREASE", "service": "Compute", "currency": "USD", "value": "10"}
+        ]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_conflict)
+
+    def test_recommendation_edge_cases(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+        from ai_engine.models import Recommendation
+
+        # A. Recommendation with NULL savings
+        rec_null = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="STORAGE_OPTIMIZATION",
+            service_name="Storage",
+            estimated_monthly_savings=None,
+            currency="USD",
+            fingerprint="fingerprint_null"
+        )
+        actions_null = [{"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": rec_null.id}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_null)
+
+        # B. Recommendation without valid service target
+        # Targets "NonexistentService" in USD
+        rec_no_svc = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="STORAGE_OPTIMIZATION",
+            service_name="NonexistentService",
+            estimated_monthly_savings=Decimal("10.00"),
+            currency="USD",
+            fingerprint="fingerprint_no_svc"
+        )
+        actions_no_svc = [{"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": rec_no_svc.id}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_no_svc)
+
+        # C. Foreign recommendation (User A trying to access User B's recommendation)
+        actions_foreign = [{"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": self.rec_b.id}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_foreign)
+
+        # D. Recommendation currency mismatch
+        # Create a record for Service Storage in EUR
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Storage",
+            resource_id="storage-eur",
+            cost=Decimal("40.00"),
+            currency="EUR",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        # Recommendation targets Storage in USD, but Storage only exists in EUR in the period
+        rec_mismatch = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="STORAGE_OPTIMIZATION",
+            service_name="Storage",
+            estimated_monthly_savings=Decimal("10.00"),
+            currency="USD",
+            fingerprint="fingerprint_mismatch"
+        )
+        actions_mismatch = [{"action_type": "RECOMMENDATION_SAVINGS", "recommendation_id": rec_mismatch.id}]
+        with self.assertRaises(ValueError):
+            run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_mismatch)
+
+    def test_mathematical_correctness(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+
+        # 1. Multi-currency percentage behavior
+        # Compute exists in USD (100.00). Let's create Compute in EUR (20.00) too.
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="comp-eur",
+            cost=Decimal("20.00"),
+            currency="EUR",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        # Apply manual percentage decrease: 20% on Compute for ALL currencies
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "Compute", "value": "20"}]
+        res = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions)
+        
+        # USD: Compute baseline 100.00 -> simulated 80.00. Total simulated = 80.00
+        self.assertEqual(res["currency_results"]["USD"]["baseline_cost"], Decimal("100.00"))
+        self.assertEqual(res["currency_results"]["USD"]["simulated_cost"], Decimal("80.00"))
+        self.assertEqual(res["currency_results"]["USD"]["absolute_change"], Decimal("-20.00"))
+        self.assertEqual(res["currency_results"]["USD"]["percentage_change"], Decimal("-20.00"))
+        
+        # EUR: Compute baseline 20.00, Database baseline 50.00.
+        # Compute simulated = 16.00, Database simulated = 50.00. Total simulated = 66.00.
+        # Baseline total = 70.00. Absolute change = -4.00. Percentage change = -4/70 * 100 = -5.71%
+        self.assertEqual(res["currency_results"]["EUR"]["baseline_cost"], Decimal("70.00"))
+        self.assertEqual(res["currency_results"]["EUR"]["simulated_cost"], Decimal("66.00"))
+        self.assertEqual(res["currency_results"]["EUR"]["absolute_change"], Decimal("-4.00"))
+        self.assertEqual(res["currency_results"]["EUR"]["percentage_change"], Decimal("-5.71"))
+
+        # 2. Fixed action affects only selected currency
+        # database + 10 EUR
+        actions_fixed = [{"action_type": "FIXED_INCREASE", "service": "Database", "currency": "EUR", "value": "10"}]
+        res_fixed = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_fixed)
+        self.assertEqual(res_fixed["currency_results"]["USD"]["simulated_cost"], Decimal("100.00")) # unchanged
+        self.assertEqual(res_fixed["currency_results"]["EUR"]["simulated_cost"], Decimal("80.00")) # 70.00 + 10.00
+
+        # 3. Negative simulated cost flooring
+        # decrease Compute (100.00) by 120 USD (fixed)
+        actions_floor = [{"action_type": "FIXED_DECREASE", "service": "Compute", "currency": "USD", "value": "120"}]
+        res_floor = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_floor)
+        self.assertEqual(res_floor["currency_results"]["USD"]["simulated_cost"], Decimal("0.00"))
+
+        # 4. Exact Decimal rounding (e.g. baseline 99.99 with 10% increase)
+        # Delete old records first
+        BillingRecord.objects.all().delete()
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="comp-round",
+            cost=Decimal("99.99"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        actions_round = [{"action_type": "PERCENT_INCREASE", "service": "Compute", "currency": "USD", "value": "10"}]
+        res_round = run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions_round)
+        # 99.99 * 1.10 = 109.989 -> rounds to 109.99
+        self.assertEqual(res_round["currency_results"]["USD"]["simulated_cost"], Decimal("109.99"))
+
+    def test_database_immutability(self):
+        from analytics.services.cost_simulator import run_cost_simulation
+        from ai_engine.models import Recommendation
+        actions = [{"action_type": "PERCENT_DECREASE", "service": "Compute", "value": "10"}]
+        
+        # Check counts before simulation
+        record_count = BillingRecord.objects.count()
+        rec_count = Recommendation.objects.count()
+        
+        run_cost_simulation(self.user_a, "LAST_MONTH", actions=actions)
+        
+        # Check counts after simulation
+        self.assertEqual(BillingRecord.objects.count(), record_count)
+        self.assertEqual(Recommendation.objects.count(), rec_count)
+        
+        # Check actual values are untouched
+        self.assertEqual(BillingRecord.objects.get(pk=self.r_usd.pk).cost, Decimal("100.00"))
+        self.assertEqual(Recommendation.objects.get(pk=self.rec_a.pk).estimated_monthly_savings, Decimal("15.00"))
+
+    def test_view_auth_and_user_isolation(self):
+        url = reverse("cost-simulator")
+        
+        # Unauthenticated request redirects
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        
+        # Authenticated access
+        self.client.login(username="simusera", password="password123")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("open_recommendations", response.context)
+        
+        # Test User B isolation in POST
+        self.client.logout()
+        self.client.login(username="simuserb", password="password123")
+        # User B has no records for last month, running simulation fails
+        post_data = {
+            "period": "LAST_MONTH",
+            "action_type[]": ["PERCENT_DECREASE"],
+            "service[]": ["Compute"],
+            "currency[]": ["USD"],
+            "value[]": ["20"],
+            "recommendation_id[]": [""]
+        }
+        response = self.client.post(url, post_data)
+        self.assertEqual(response.status_code, 200)
+        # Check for message error "No billing records found"
+        self.assertContains(response, "No billing records found for the selected time period.")
+
+    def test_dashboard_card_links_to_simulator(self):
+        self.client.login(username="simusera", password="password123")
+        response = self.client.get(reverse("dashboard-home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("cost-simulator"))
+
+
+class ExecutiveReportTests(TestCase):
+    def setUp(self):
+        from ai_engine.models import Recommendation
+        self.user_a = User.objects.create_user(username="repuser_a", email="ra@example.com", password="password123")
+        self.user_b = User.objects.create_user(username="repuser_b", email="rb@example.com", password="password123")
+
+        self.upload_a = BillingUpload.objects.create(
+            uploaded_by=self.user_a,
+            upload_type="Billing Report",
+            original_filename="user_a.csv"
+        )
+        self.upload_b = BillingUpload.objects.create(
+            uploaded_by=self.user_b,
+            upload_type="Billing Report",
+            original_filename="user_b.csv"
+        )
+
+        from django.utils import timezone
+        today = timezone.localdate()
+        first_of_this_month = today.replace(day=1)
+        self.last_month_date = first_of_this_month - datetime.timedelta(days=2)
+        
+        # User A billing records
+        self.r1 = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_id="comp-1",
+            cost=Decimal("100.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        self.r2 = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Database",
+            resource_id="db-1",
+            cost=Decimal("200.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+
+        # User B billing records
+        self.r_b = BillingRecord.objects.create(
+            upload=self.upload_b,
+            service="Compute",
+            resource_id="comp-b",
+            cost=Decimal("500.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+
+        # User A Anomalies
+        self.anom_crit = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date,
+            service_name="Compute",
+            actual_cost=Decimal("120.00"),
+            expected_cost=Decimal("20.00"),
+            deviation_percentage=Decimal("500.00"),
+            severity="CRITICAL",
+            status="OPEN"
+        )
+        self.anom_low = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date,
+            service_name="Compute",
+            resource_id="comp-low",
+            actual_cost=Decimal("30.00"),
+            expected_cost=Decimal("20.00"),
+            deviation_percentage=Decimal("50.00"),
+            severity="LOW",
+            status="OPEN"
+        )
+
+        # User B Anomalies
+        self.anom_b = CostAnomaly.objects.create(
+            user=self.user_b,
+            billing_upload=self.upload_b,
+            anomaly_type="DAILY_SPIKE",
+            detected_date=self.last_month_date,
+            actual_cost=Decimal("200.00"),
+            expected_cost=Decimal("100.00"),
+            deviation_percentage=Decimal("100.00"),
+            severity="CRITICAL",
+            status="OPEN"
+        )
+
+        # User A Waste Findings
+        self.w1 = WasteFinding.objects.create(
+            user=self.user_a,
+            waste_type="POSSIBLE_UNUSED_STORAGE",
+            resource_id="stale-vol",
+            service_name="Storage",
+            currency="USD",
+            first_seen=self.last_month_date - datetime.timedelta(days=5),
+            last_seen=self.last_month_date + datetime.timedelta(days=5),
+            observation_days=10,
+            calendar_span_days=10,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("40.00"),
+            average_daily_cost=Decimal("4.00"),
+            estimated_monthly_cost=Decimal("120.00"),
+            estimated_monthly_savings=Decimal("120.00"),
+            confidence="HIGH",
+            status="OPEN"
+        )
+
+        # User B Waste Findings
+        self.w_b = WasteFinding.objects.create(
+            user=self.user_b,
+            waste_type="PERSISTENT_LOW_COST_RESOURCE",
+            service_name="Compute",
+            currency="USD",
+            first_seen=self.last_month_date,
+            last_seen=self.last_month_date,
+            observation_days=1,
+            calendar_span_days=1,
+            coverage_ratio=Decimal("1.0"),
+            total_cost=Decimal("10.00"),
+            average_daily_cost=Decimal("10.00"),
+            estimated_monthly_cost=Decimal("300.00"),
+            estimated_monthly_savings=Decimal("300.00"),
+            confidence="HIGH",
+            status="OPEN"
+        )
+
+        # User A Recommendations
+        self.rec1 = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="STORAGE_OPTIMIZATION",
+            service_name="Storage",
+            source_type="WASTE_FINDING",
+            source_id=self.w1.id,
+            estimated_monthly_savings=Decimal("120.00"),
+            currency="USD",
+            savings_source="WASTE_FINDING",
+            priority="HIGH",
+            confidence="HIGH",
+            status="OPEN",
+            fingerprint="user_a_rec_1"
+        )
+        self.rec2 = Recommendation.objects.create(
+            user=self.user_a,
+            recommendation_type="RIGHTSIZE_REVIEW",
+            service_name="Compute",
+            source_type="WASTE_FINDING",
+            source_id=self.w1.id,
+            estimated_monthly_savings=Decimal("120.00"),
+            currency="USD",
+            savings_source="WASTE_FINDING",
+            priority="LOW",
+            confidence="MEDIUM",
+            status="OPEN",
+            fingerprint="user_a_rec_2"
+        )
+        
+        # Override auto_now_add detected_at dates for period query isolation
+        dt = datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        Recommendation.objects.filter(pk__in=[self.rec1.pk, self.rec2.pk]).update(detected_at=dt)
+
+    def test_access_requires_login(self):
+        url = reverse("cost-report")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(url, {"period": "LAST_MONTH"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_user_isolation(self):
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        # User A's records count should be 2 (self.r1 and self.r2)
+        self.assertEqual(data["total_records_count"], 2)
+        
+        # Excludes User B anomaly
+        self.assertEqual(len(data["anomalies"]), 2)
+        self.assertNotIn(self.anom_b, data["anomalies"])
+
+        # Excludes User B waste finding
+        self.assertEqual(len(data["waste_findings"]), 1)
+        self.assertNotIn(self.w_b, data["waste_findings"])
+
+        # Excludes User B recommendation
+        self.assertEqual(len(data["recommendations"]), 2)
+
+    def test_period_selections(self):
+        from analytics.services.report_service import collect_report_data
+        
+        # Last Month
+        data_last = collect_report_data(self.user_a, "LAST_MONTH")
+        self.assertEqual(data_last["total_records_count"], 2)
+
+        # Current Month (no records exist, should show 0)
+        data_curr = collect_report_data(self.user_a, "CURRENT_MONTH")
+        self.assertEqual(data_curr["total_records_count"], 0)
+
+        # Last 30 Days
+        data_30 = collect_report_data(self.user_a, "LAST_30_DAYS")
+        # should cover last month date
+        self.assertEqual(data_30["total_records_count"], 2)
+
+        # Custom date validation
+        # valid custom
+        sd = self.last_month_date.strftime("%Y-%m-%d")
+        ed = self.last_month_date.strftime("%Y-%m-%d")
+        data_cust = collect_report_data(self.user_a, "CUSTOM", start_date_str=sd, end_date_str=ed)
+        self.assertEqual(data_cust["total_records_count"], 2)
+
+        # malformed dates or start_date > end_date
+        with self.assertRaises(ValueError):
+            collect_report_data(self.user_a, "CUSTOM", start_date_str="2026/01/01", end_date_str="2026-01-31")
+        with self.assertRaises(ValueError):
+            collect_report_data(self.user_a, "CUSTOM", start_date_str="2026-02-01", end_date_str="2026-01-31")
+        with self.assertRaises(ValueError):
+            collect_report_data(self.user_a, "CUSTOM")
+
+    def test_financial_aggregations_and_normalization(self):
+        # Create record with empty service, currency, region
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="",
+            resource_id="blank-res",
+            cost=Decimal("50.00"),
+            currency="",
+            region="",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        # normalizes null currency to UNKNOWN
+        self.assertIn("UNKNOWN", data["total_costs"])
+        self.assertEqual(data["total_costs"]["UNKNOWN"], Decimal("50.00"))
+
+        # normalizes null service to Unknown Service
+        services = [s["service"] for s in data["services_breakdown"]["UNKNOWN"]]
+        self.assertIn("Unknown Service", services)
+
+        # normalizes null region to Unknown Region
+        regions = [r["region"] for r in data["regions_breakdown"]["UNKNOWN"]]
+        self.assertIn("Unknown Region", regions)
+
+        # unique resources identity priority test
+        # self.r1 has resource_id="comp-1".
+        # Create a record with blank resource_id but with resource_name="my-res"
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute",
+            resource_name="my-res",
+            cost=Decimal("10.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        res_names = [r["resource"] for r in data["top_resources"]["USD"]]
+        self.assertIn("my-res", res_names)
+
+    def test_deduplication(self):
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        # rec1 and rec2 both point to self.w1.id (WasteFinding).
+        # Savings total should count self.w1 only once: 120.00 USD
+        self.assertEqual(data["potential_savings"]["USD"], Decimal("120.00"))
+
+    def test_forecast_integration(self):
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        # forecast is enabled by default
+        self.assertIn("forecast_results", data)
+        # USD has insufficient history (needs 3 completed months)
+        self.assertIn("USD", data["forecast_results"])
+        self.assertFalse(data["forecast_results"]["USD"]["forecast_available"])
+
+    def test_optional_section_validation(self):
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        
+        # POST request disabling cost_breakdown and forecast
+        post_data = {
+            "period": "LAST_MONTH",
+            "sections[]": ["anomalies", "waste", "recommendations"]
+        }
+        response = self.client.post(url, post_data)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        
+        # check PDF signature
+        pdf_bytes = b"".join(response.streaming_content) if hasattr(response, "streaming_content") else response.content
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_empty_dataset_pdf_generation(self):
+        # User A has no records for the current month
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        post_data = {
+            "period": "CURRENT_MONTH",
+            "sections[]": ["cost_breakdown", "anomalies", "waste", "recommendations", "forecast"]
+        }
+        response = self.client.post(url, post_data)
+        self.assertEqual(response.status_code, 200)
+        
+        pdf_bytes = b"".join(response.streaming_content) if hasattr(response, "streaming_content") else response.content
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_xml_characters_escaping(self):
+        # Create billing record and anomaly with XML special characters
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute & Storage <Test>",
+            resource_id="r&d-node",
+            cost=Decimal("15.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        response = self.client.post(url, {"period": "LAST_MONTH"})
+        self.assertEqual(response.status_code, 200)
+        pdf_bytes = b"".join(response.streaming_content) if hasattr(response, "streaming_content") else response.content
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_database_immutability(self):
+        from analytics.services.report_service import collect_report_data
+        from analytics.services.pdf_report_generator import generate_pdf_report
+        from ai_engine.models import Recommendation
+        
+        # snapshot counts
+        upload_count = BillingUpload.objects.count()
+        record_count = BillingRecord.objects.count()
+        anomaly_count = CostAnomaly.objects.count()
+        waste_count = WasteFinding.objects.count()
+        rec_count = Recommendation.objects.count()
+
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        generate_pdf_report(data)
+
+        # counts should remain unchanged
+        self.assertEqual(BillingUpload.objects.count(), upload_count)
+        self.assertEqual(BillingRecord.objects.count(), record_count)
+        self.assertEqual(CostAnomaly.objects.count(), anomaly_count)
+        self.assertEqual(WasteFinding.objects.count(), waste_count)
+        self.assertEqual(Recommendation.objects.count(), rec_count)
+
+    def test_multi_page_pdf_generation(self):
+        # Clear NumberedCanvas instances
+        from analytics.services.pdf_report_generator import NumberedCanvas
+        NumberedCanvas.drawn_instances = []
+
+        # Request report for User A for LAST_MONTH
+        # Create a large dataset to force multiple pages
+        for i in range(35):
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service=f"ComputeService{i}",
+                resource_id=f"res-{i}",
+                cost=Decimal("10.00"),
+                currency="USD",
+                usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+            )
+
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        response = self.client.post(url, {"period": "LAST_MONTH"})
+        self.assertEqual(response.status_code, 200)
+        pdf_bytes = b"".join(response.streaming_content) if hasattr(response, "streaming_content") else response.content
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+        self.assertTrue(len(NumberedCanvas.drawn_instances) > 0)
+        canvas_inst = NumberedCanvas.drawn_instances[-1]
+        self.assertTrue(len(canvas_inst._saved_page_states) > 1) # Must span multiple pages
+        
+        self.assertTrue(len(canvas_inst.pages_decorated) > 0)
+        first_decor = canvas_inst.pages_decorated[0]
+        self.assertEqual(first_decor["page_num"], 2)
+        self.assertEqual(first_decor["page_count"], len(canvas_inst._saved_page_states))
+        self.assertIn(f"Page 2 of {len(canvas_inst._saved_page_states)}", first_decor["page_text"])
+
+    def test_last_30_days_exact_boundary(self):
+        from analytics.services.report_service import resolve_report_period
+        start_date, end_date = resolve_report_period("LAST_30_DAYS")
+        # should contain exactly 30 inclusive calendar dates
+        num_days = (end_date - start_date).days + 1
+        self.assertEqual(num_days, 30)
+
+    def test_year_boundary(self):
+        from unittest.mock import patch
+        from analytics.services.report_service import resolve_report_period
+        # Mock timezone.localdate to return Jan 1st of a new year
+        with patch("django.utils.timezone.localdate", return_value=datetime.date(2027, 1, 1)):
+            # Last Month of previous year (December 2026)
+            lm_start, lm_end = resolve_report_period("LAST_MONTH")
+            self.assertEqual(lm_start, datetime.date(2026, 12, 1))
+            self.assertEqual(lm_end, datetime.date(2026, 12, 31))
+
+            # Current Month
+            cm_start, cm_end = resolve_report_period("CURRENT_MONTH")
+            self.assertEqual(cm_start, datetime.date(2027, 1, 1))
+            self.assertEqual(cm_end, datetime.date(2027, 1, 31))
+
+    def test_anomaly_date_and_severity_ordering_and_ties(self):
+        # Clear existing anomalies
+        CostAnomaly.objects.filter(user=self.user_a).delete()
+
+        # Create anomalies with different dates, severities, pks
+        # CRITICAL, HIGH, MEDIUM, LOW
+        # For ties, detected_date desc, then pk asc
+        a1 = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date,
+            severity="LOW",
+            actual_cost=Decimal("1.00"), expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"),
+            status="OPEN",
+            resource_id="res-1"
+        )
+        a2 = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date + datetime.timedelta(days=1), # newer date -> should come first in tie
+            severity="HIGH",
+            actual_cost=Decimal("1.00"), expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"),
+            status="OPEN",
+            resource_id="res-2"
+        )
+        a3 = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date, # older date -> should come second
+            severity="HIGH",
+            actual_cost=Decimal("1.00"), expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"),
+            status="OPEN",
+            resource_id="res-3"
+        )
+        a4 = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date, # same severity, same date -> pk tie breaker (a4 has larger pk, so after a3)
+            severity="HIGH",
+            actual_cost=Decimal("1.00"), expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"),
+            status="OPEN",
+            resource_id="res-4"
+        )
+        a5 = CostAnomaly.objects.create(
+            user=self.user_a,
+            billing_upload=self.upload_a,
+            anomaly_type="RESOURCE_SPIKE",
+            detected_date=self.last_month_date,
+            severity="CRITICAL",
+            actual_cost=Decimal("1.00"), expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"),
+            status="OPEN",
+            resource_id="res-5"
+        )
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        anomalies_list = data["anomalies"]
+        
+        # Expected order:
+        # 1. a5 (CRITICAL)
+        # 2. a2 (HIGH, newer date: last_month_date + 1)
+        # 3. a3 (HIGH, older date, lower pk)
+        # 4. a4 (HIGH, older date, higher pk)
+        # 5. a1 (LOW)
+        self.assertEqual([a.pk for a in anomalies_list], [a5.pk, a2.pk, a3.pk, a4.pk, a1.pk])
+
+    def test_waste_observation_overlap_boundaries(self):
+        # Clear existing waste findings
+        WasteFinding.objects.filter(user=self.user_a).delete()
+
+        # Report period is LAST_MONTH. Let's find dates
+        from analytics.services.report_service import resolve_report_period
+        start_date, end_date = resolve_report_period("LAST_MONTH")
+
+        # 1. strictly before: last_seen < start_date -> excluded
+        w_before = WasteFinding.objects.create(
+            user=self.user_a, waste_type="POSSIBLE_UNUSED_STORAGE", confidence="HIGH",
+            first_seen=start_date - datetime.timedelta(days=10),
+            last_seen=start_date - datetime.timedelta(days=1),
+            estimated_monthly_savings=Decimal("10"), currency="USD", total_cost=Decimal("0.00"),
+            average_daily_cost=Decimal("0.00"), estimated_monthly_cost=Decimal("0.00"), status="OPEN",
+            observation_days=10, calendar_span_days=10, coverage_ratio=Decimal("1.0"),
+            resource_key="stale-vol-before"
+        )
+
+        # 2. strictly after: first_seen > end_date -> excluded
+        w_after = WasteFinding.objects.create(
+            user=self.user_a, waste_type="POSSIBLE_UNUSED_STORAGE", confidence="HIGH",
+            first_seen=end_date + datetime.timedelta(days=1),
+            last_seen=end_date + datetime.timedelta(days=10),
+            estimated_monthly_savings=Decimal("10"), currency="USD", total_cost=Decimal("0.00"),
+            average_daily_cost=Decimal("0.00"), estimated_monthly_cost=Decimal("0.00"), status="OPEN",
+            observation_days=10, calendar_span_days=10, coverage_ratio=Decimal("1.0"),
+            resource_key="stale-vol-after"
+        )
+
+        # 3. left boundary overlap: last_seen = start_date -> included
+        w_left = WasteFinding.objects.create(
+            user=self.user_a, waste_type="POSSIBLE_UNUSED_STORAGE", confidence="HIGH",
+            first_seen=start_date - datetime.timedelta(days=5),
+            last_seen=start_date,
+            estimated_monthly_savings=Decimal("10"), currency="USD", total_cost=Decimal("0.00"),
+            average_daily_cost=Decimal("0.00"), estimated_monthly_cost=Decimal("0.00"), status="OPEN",
+            observation_days=10, calendar_span_days=10, coverage_ratio=Decimal("1.0"),
+            resource_key="stale-vol-left"
+        )
+
+        # 4. right boundary overlap: first_seen = end_date -> included
+        w_right = WasteFinding.objects.create(
+            user=self.user_a, waste_type="POSSIBLE_UNUSED_STORAGE", confidence="HIGH",
+            first_seen=end_date,
+            last_seen=end_date + datetime.timedelta(days=5),
+            estimated_monthly_savings=Decimal("10"), currency="USD", total_cost=Decimal("0.00"),
+            average_daily_cost=Decimal("0.00"), estimated_monthly_cost=Decimal("0.00"), status="OPEN",
+            observation_days=10, calendar_span_days=10, coverage_ratio=Decimal("1.0"),
+            resource_key="stale-vol-right"
+        )
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        w_pks = [w.pk for w in data["waste_findings"]]
+        
+        self.assertIn(w_left.pk, w_pks)
+        self.assertIn(w_right.pk, w_pks)
+        self.assertNotIn(w_before.pk, w_pks)
+        self.assertNotIn(w_after.pk, w_pks)
+
+    def test_recommendation_period_semantics(self):
+        from ai_engine.models import Recommendation
+        Recommendation.objects.filter(user=self.user_a).delete()
+
+        from analytics.services.report_service import resolve_report_period
+        start_date, end_date = resolve_report_period("LAST_MONTH")
+
+        # Create recommendation inside period
+        dt_in = datetime.datetime.combine(start_date + datetime.timedelta(days=5), datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        r_in = Recommendation.objects.create(
+            user=self.user_a, recommendation_type="RIGHTSIZE_REVIEW", priority="HIGH",
+            savings_source="WASTE_FINDING", status="OPEN", fingerprint="rec_in"
+        )
+        Recommendation.objects.filter(pk=r_in.pk).update(detected_at=dt_in)
+
+        # Create recommendation outside period
+        dt_out = datetime.datetime.combine(end_date + datetime.timedelta(days=5), datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        r_out = Recommendation.objects.create(
+            user=self.user_a, recommendation_type="RIGHTSIZE_REVIEW", priority="HIGH",
+            savings_source="WASTE_FINDING", status="OPEN", fingerprint="rec_out"
+        )
+        Recommendation.objects.filter(pk=r_out.pk).update(detected_at=dt_out)
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        rec_pks = [r.pk for r in data["recommendations"]]
+        self.assertIn(r_in.pk, rec_pks)
+        self.assertNotIn(r_out.pk, rec_pks)
+
+    def test_arbitrary_optional_section_names_ignored(self):
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        post_data = {
+            "period": "LAST_MONTH",
+            "sections[]": ["anomalies", "waste", "some_random_section_name"]
+        }
+        response = self.client.post(url, post_data)
+        # Should generate PDF successfully and completely ignore "some_random_section_name"
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_cost_table_10_row_limit(self):
+        # Create 15 distinct service types under USD
+        for i in range(15):
+            BillingRecord.objects.create(
+                upload=self.upload_a,
+                service=f"Svc-{i}",
+                region=f"Reg-{i}",
+                resource_id=f"Res-{i}",
+                cost=Decimal("10.00"),
+                currency="USD",
+                usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+            )
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        self.assertEqual(len(data["services_breakdown"]["USD"]), 10)
+        self.assertEqual(len(data["regions_breakdown"]["USD"]), 10)
+        self.assertEqual(len(data["top_resources"]["USD"]), 10)
+
+    def test_anomaly_waste_recommendation_20_row_limits(self):
+        # Clear existing
+        CostAnomaly.objects.filter(user=self.user_a).delete()
+        WasteFinding.objects.filter(user=self.user_a).delete()
+        from ai_engine.models import Recommendation
+        Recommendation.objects.filter(user=self.user_a).delete()
+
+        # Create 25 anomalies, waste findings, recommendations
+        for i in range(25):
+            a = CostAnomaly.objects.create(
+                user=self.user_a, billing_upload=self.upload_a, anomaly_type="RESOURCE_SPIKE",
+                detected_date=self.last_month_date, severity="LOW", actual_cost=Decimal("1.00"),
+                expected_cost=Decimal("0.00"), deviation_percentage=Decimal("0.00"), status="OPEN",
+                resource_id=f"anom-limit-{i}"
+            )
+            w = WasteFinding.objects.create(
+                user=self.user_a, waste_type="POSSIBLE_UNUSED_STORAGE", confidence="HIGH",
+                first_seen=self.last_month_date, last_seen=self.last_month_date,
+                estimated_monthly_savings=Decimal("10"), currency="USD", total_cost=Decimal("0.00"),
+                average_daily_cost=Decimal("0.00"), estimated_monthly_cost=Decimal("0.00"), status="OPEN",
+                observation_days=10, calendar_span_days=10, coverage_ratio=Decimal("1.0"),
+                resource_key=f"waste-limit-{i}"
+            )
+            r = Recommendation.objects.create(
+                user=self.user_a, recommendation_type="RIGHTSIZE_REVIEW", priority="HIGH",
+                savings_source="WASTE_FINDING", status="OPEN", fingerprint=f"rec_limit_{i}"
+            )
+            Recommendation.objects.filter(pk=r.pk).update(
+                detected_at=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+            )
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        self.assertEqual(len(data["anomalies"]), 20)
+        self.assertEqual(len(data["waste_findings"]), 20)
+        self.assertEqual(len(data["recommendations"]), 20)
+
+    def test_null_recommendation_savings(self):
+        # Test that null estimated_monthly_savings is handled safely in sorting and deduplication
+        from ai_engine.models import Recommendation
+        Recommendation.objects.filter(user=self.user_a).delete()
+
+        # Recommendation with NULL savings
+        r_null = Recommendation.objects.create(
+            user=self.user_a, recommendation_type="RIGHTSIZE_REVIEW", priority="HIGH",
+            savings_source="WASTE_FINDING", estimated_monthly_savings=None, currency="USD",
+            status="OPEN", fingerprint="rec_null_savings"
+        )
+        Recommendation.objects.filter(pk=r_null.pk).update(
+            detected_at=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        # Should be included in recommendation list
+        self.assertEqual(len(data["recommendations"]), 1)
+        self.assertEqual(data["recommendations"][0].pk, r_null.pk)
+        
+        # Savings KPI under USD should be empty or 0.00 (not containing the null savings recommendation)
+        self.assertEqual(data["potential_savings"].get("USD", Decimal("0.00")), Decimal("0.00"))
+
+    def test_warnings_for_missing_metadata(self):
+        # Clear existing records
+        BillingRecord.objects.filter(upload=self.upload_a).delete()
+
+        # Create record with blank currency, service, region
+        r = BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="",
+            region="",
+            currency="",
+            cost=Decimal("10.00"),
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        
+        # UNKNOWN warnings should be in warnings list
+        self.assertIn("Billing records with missing or unknown currencies were detected (categorized as UNKNOWN).", data["warnings"])
+        self.assertIn("Billing records with missing service names were detected (categorized as Unknown Service).", data["warnings"])
+        self.assertIn("Billing records with missing regions were detected (categorized as Unknown Region).", data["warnings"])
+
+    def test_forecast_state_variations_and_currency_isolation(self):
+        # By default, not enough data (needs 3 completed months)
+        from analytics.services.report_service import collect_report_data
+        data = collect_report_data(self.user_a, "LAST_MONTH")
+        self.assertFalse(data["forecast_results"]["USD"]["forecast_available"])
+        self.assertIn("At least 3 months of historical billing data", data["forecast_results"]["USD"]["reason"])
+
+        # Create enough data across 4 months for USD and EUR
+        # Let's create uploads and records for Jan, Feb, Mar, Apr
+        from unittest.mock import patch
+        # Clear all records first to prevent overlap issues
+        BillingRecord.objects.filter(upload__uploaded_by=self.user_a).delete()
+
+        months = [
+            datetime.date(2026, 1, 15),
+            datetime.date(2026, 2, 15),
+            datetime.date(2026, 3, 15),
+            datetime.date(2026, 4, 15)
+        ]
+        for m in months:
+            # USD records
+            BillingRecord.objects.create(
+                upload=self.upload_a, service="Compute", cost=Decimal("100.00"), currency="USD",
+                usage_start=datetime.datetime.combine(m, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+            )
+            # EUR records
+            BillingRecord.objects.create(
+                upload=self.upload_a, service="Compute", cost=Decimal("50.00"), currency="EUR",
+                usage_start=datetime.datetime.combine(m, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+            )
+
+        with patch("django.utils.timezone.localdate", return_value=datetime.date(2026, 5, 10)):
+            data_fc = collect_report_data(self.user_a, "LAST_MONTH")
+            
+            # Verify USD forecast is available and isolated from EUR
+            self.assertTrue(data_fc["forecast_results"]["USD"]["forecast_available"])
+            self.assertEqual(data_fc["forecast_results"]["USD"]["next_month_forecast"], Decimal("100.00"))
+            
+            self.assertTrue(data_fc["forecast_results"]["EUR"]["forecast_available"])
+            self.assertEqual(data_fc["forecast_results"]["EUR"]["next_month_forecast"], Decimal("50.00"))
+
+    def test_unicode_and_xml_escaping_in_pdf(self):
+        # Create record with XML characters and some unicode characters
+        BillingRecord.objects.create(
+            upload=self.upload_a,
+            service="Compute & Storage <Instance> \u2605", # star unicode symbol
+            region="us-phoenix-1",
+            cost=Decimal("15.00"),
+            currency="USD",
+            usage_start=datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
+        )
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        response = self.client.post(url, {"period": "LAST_MONTH"})
+        self.assertEqual(response.status_code, 200)
+        pdf_bytes = b"".join(response.streaming_content) if hasattr(response, "streaming_content") else response.content
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_safe_error_handling(self):
+        # Force collect_report_data to raise an unexpected database exception or similar RuntimeException
+        from unittest.mock import patch
+        with patch("analytics.services.report_service.collect_report_data_for_project", side_effect=RuntimeError("Secret DB Connection string /path/to/db failed")):
+            self.client.login(username="repuser_a", password="password123")
+            url = reverse("cost-report")
+            response = self.client.post(url, {"period": "LAST_MONTH"})
+            
+            # View renders standard error message
+            self.assertEqual(response.status_code, 200)
+            # The template handles messages
+            html = response.content.decode("utf-8")
+            self.assertIn("Unable to generate the report. Please verify the report settings and try again.", html)
+            self.assertNotIn("Secret DB Connection string", html)
+            self.assertNotIn("RuntimeError", html)
+
+    def test_no_gemini_invocations(self):
+        # Verify that generating report makes no calls to the AI Engine provider or Gemini client.
+        # Patch the genai client/GeminiProvider to raise an exception if it's called
+        from unittest.mock import patch
+        with patch("ai_engine.services.provider.GeminiProvider.generate_explanation", side_effect=Exception("Should not call LLM")):
+            self.client.login(username="repuser_a", password="password123")
+            url = reverse("cost-report")
+            response = self.client.post(url, {"period": "LAST_MONTH"})
+            self.assertEqual(response.status_code, 200)
+            
+    def test_report_db_immutability(self):
+        # Snapshot the db
+        counts = {
+            "upload": BillingUpload.objects.count(),
+            "record": BillingRecord.objects.count(),
+            "anomaly": CostAnomaly.objects.count(),
+            "waste": WasteFinding.objects.count(),
+        }
+        
+        # Keep exact field values in check for one of anomalies
+        anomaly_val = CostAnomaly.objects.first()
+        old_cost = anomaly_val.actual_cost
+        
+        self.client.login(username="repuser_a", password="password123")
+        url = reverse("cost-report")
+        response = self.client.post(url, {"period": "LAST_MONTH"})
+        self.assertEqual(response.status_code, 200)
+
+        # Assert no writes occurred
+        self.assertEqual(BillingUpload.objects.count(), counts["upload"])
+        self.assertEqual(BillingRecord.objects.count(), counts["record"])
+        self.assertEqual(CostAnomaly.objects.count(), counts["anomaly"])
+        self.assertEqual(WasteFinding.objects.count(), counts["waste"])
+        
+        # Field values are unchanged
+        self.assertEqual(CostAnomaly.objects.first().actual_cost, old_cost)
+
+
+
+
+

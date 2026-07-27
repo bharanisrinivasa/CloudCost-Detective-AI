@@ -6,6 +6,13 @@ from .services import get_dashboard_metrics
 @login_required
 def dashboard_home(request):
     """Render the interactive dashboard home page for authenticated users."""
+    from accounts.permissions import get_active_project
+    from django.shortcuts import redirect
+    
+    active_project = get_active_project(request)
+    if not active_project:
+        return redirect("accounts:project-list")
+
     filters = {
         'start_date': request.GET.get('start_date'),
         'end_date': request.GET.get('end_date'),
@@ -13,19 +20,21 @@ def dashboard_home(request):
         'region': request.GET.get('region'),
     }
     
-    context = get_dashboard_metrics(request.user, filters)
+    from dashboard.services.analytics import get_dashboard_metrics_for_project
+    context = get_dashboard_metrics_for_project(active_project, filters)
+    context['active_project'] = active_project
     
-    # Import and aggregate Module 5 anomaly KPI counters scoped to request.user
+    # Import and aggregate Module 5 anomaly KPI counters scoped to project
     from analytics.models import CostAnomaly
-    context['open_anomalies_count'] = CostAnomaly.objects.filter(user=request.user, status="OPEN").count()
-    context['critical_anomalies_count'] = CostAnomaly.objects.filter(user=request.user, status="OPEN", severity="CRITICAL").count()
+    context['open_anomalies_count'] = CostAnomaly.objects.filter(project=active_project, status="OPEN").count()
+    context['critical_anomalies_count'] = CostAnomaly.objects.filter(project=active_project, status="OPEN", severity="CRITICAL").count()
     
-    # Import and aggregate Module 6 waste KPI counters scoped to request.user
+    # Import and aggregate Module 6 waste KPI counters scoped to project
     from analytics.models import WasteFinding
     from django.db.models import Sum
     from decimal import Decimal
     
-    open_waste = WasteFinding.objects.filter(user=request.user, status="OPEN")
+    open_waste = WasteFinding.objects.filter(project=active_project, status="OPEN")
     context['open_waste_count'] = open_waste.count()
     
     savings_by_currency = (
@@ -40,32 +49,21 @@ def dashboard_home(request):
     context['potential_waste_savings'] = ", ".join(savings_parts) if savings_parts else "0.00 USD"
     context['waste_has_multiple_currencies'] = len(savings_by_currency) > 1
     
-    # Import and aggregate Module 9 recommendation KPI counters scoped to request.user
+    # Import and aggregate Module 9 recommendation KPI counters scoped to project
     from ai_engine.models import Recommendation
-    open_recs = Recommendation.objects.filter(user=request.user, status="OPEN")
+    open_recs = Recommendation.objects.filter(project=active_project, status="OPEN")
     context['open_recommendations_count'] = open_recs.count()
     context['high_priority_recommendations_count'] = open_recs.filter(priority__in=["HIGH", "CRITICAL"]).count()
     
-    rec_savings = {}
-    seen_waste_ids = set()
-    for rec in open_recs:
-        if rec.estimated_monthly_savings is None:
-            continue
-        curr = rec.currency or "USD"
-        if rec.savings_source == "WASTE_FINDING" and rec.source_id is not None:
-            if rec.source_id in seen_waste_ids:
-                continue
-            seen_waste_ids.add(rec.source_id)
-        if curr not in rec_savings:
-            rec_savings[curr] = Decimal("0.00")
-        rec_savings[curr] += rec.estimated_monthly_savings
+    from analytics.services.report_service import get_deduplicated_savings
+    rec_savings = get_deduplicated_savings(open_recs, default_currency="USD")
 
     rec_savings_parts = [f"{val:.2f} {cur}" for cur, val in rec_savings.items()]
     context['potential_recommendation_savings'] = ", ".join(rec_savings_parts) if rec_savings_parts else "0.00 USD"
     
     # Module 10 forecasting integration
-    from analytics.services.cost_forecaster import get_forecast_for_user
-    forecast_results = get_forecast_for_user(request.user)
+    from analytics.services.cost_forecaster import get_forecast_for_project
+    forecast_results = get_forecast_for_project(active_project)
     
     forecast_available = False
     forecast_summaries = []
@@ -80,6 +78,8 @@ def dashboard_home(request):
             
     context['forecast_available'] = forecast_available
     context['forecast_summaries'] = forecast_summaries
+    context['has_simulator'] = True
+    context['has_reports'] = True
     
     return render(request, "dashboard/home.html", context)
 

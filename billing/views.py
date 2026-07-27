@@ -40,14 +40,26 @@ class BillingRecordListView(generics.ListAPIView):
 # MODULE 2 - HTML View Handlers
 # ==========================================
 
+from django.core.exceptions import PermissionDenied
+from accounts.permissions import get_active_project, has_project_permission
+
+
 @login_required
 def upload_billing_view(request):
     """View to handle OCI Billing CSV uploads."""
+    project = get_active_project(request)
+    if not project:
+        return redirect("accounts:project-list")
+
+    if not has_project_permission(request.user, project, "UPLOAD_BILLING"):
+        raise PermissionDenied("You do not have permission to upload billing reports.")
+
     if request.method == "POST":
         form = BillingUploadForm(request.POST, request.FILES)
         if form.is_valid():
             upload = form.save(commit=False)
             upload.uploaded_by = request.user
+            upload.project = project
             upload.upload_type = "Billing Report"
             upload.upload_status = "Uploaded"
             upload.save()
@@ -71,11 +83,19 @@ def upload_billing_view(request):
 @login_required
 def upload_usage_view(request):
     """View to handle OCI Usage CSV uploads."""
+    project = get_active_project(request)
+    if not project:
+        return redirect("accounts:project-list")
+
+    if not has_project_permission(request.user, project, "UPLOAD_BILLING"):
+        raise PermissionDenied("You do not have permission to upload usage reports.")
+
     if request.method == "POST":
         form = BillingUploadForm(request.POST, request.FILES)
         if form.is_valid():
             upload = form.save(commit=False)
             upload.uploaded_by = request.user
+            upload.project = project
             upload.upload_type = "Usage Report"
             upload.upload_status = "Uploaded"
             upload.save()
@@ -99,7 +119,14 @@ def upload_usage_view(request):
 @login_required
 def upload_history_view(request):
     """View to display all billing and usage report uploads."""
-    uploads = BillingUpload.objects.all().order_by("-uploaded_at")
+    project = get_active_project(request)
+    if not project:
+        return redirect("accounts:project-list")
+
+    if not has_project_permission(request.user, project, "VIEW_BILLING"):
+        raise PermissionDenied("You do not have permission to view billing history.")
+
+    uploads = BillingUpload.objects.filter(project=project).order_by("-uploaded_at")
     return render(request, "billing/upload_history.html", {
         "uploads": uploads
     })
@@ -108,7 +135,18 @@ def upload_history_view(request):
 @login_required
 def upload_detail_view(request, pk):
     """View to display details of a single report upload."""
+    project = get_active_project(request)
+    if not project:
+        return redirect("accounts:project-list")
+
+    if not has_project_permission(request.user, project, "VIEW_BILLING"):
+        raise PermissionDenied("You do not have permission to view upload details.")
+
     upload = get_object_or_404(BillingUpload, pk=pk)
+    from accounts.models import OrganizationMembership
+    if not OrganizationMembership.objects.filter(user=request.user, organization=upload.project.organization).exists():
+        raise PermissionDenied("You do not have permission to view this upload.")
+
     return render(request, "billing/upload_detail.html", {
         "upload": upload
     })
@@ -119,11 +157,11 @@ def upload_delete_view(request, pk):
     """View to delete a single report upload along with its physical file."""
     upload = get_object_or_404(BillingUpload, pk=pk)
     
-    # Ownership restriction check
+    # Ownership and staff restrictions
     if upload.uploaded_by != request.user and not request.user.is_staff:
-        messages.error(request, "You do not have permission to delete this upload.")
+        messages.error(request, "You do not have permission to delete this report.")
         return redirect("upload-history")
-        
+
     if request.method == "POST":
         original_name = upload.original_filename
         # Delete file from filesystem

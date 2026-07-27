@@ -3,13 +3,31 @@ from django.utils import timezone
 from billing.models import BillingRecord
 from collections import defaultdict
 
+import warnings
+
 def get_forecast_for_user(user):
     """
-    Calculates on-demand monthly cost forecasts for a user, split by currency.
+    DEPRECATED: Backward compatibility wrapper for user-based forecast.
+    Use get_forecast_for_project instead.
+    """
+    warnings.warn(
+        "get_forecast_for_user is deprecated. Use get_forecast_for_project instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    from accounts.models import Project
+    project = Project.objects.filter(organization__memberships__user=user).first()
+    return get_forecast_for_project(project)
+
+def get_forecast_for_project(project):
+    """
+    Calculates on-demand monthly cost forecasts for a project, split by currency.
     Returns a dictionary mapping currency string to forecast result dictionary.
     """
-    # 1. Retrieve all billing records scoped to user with non-null usage_start
-    records = BillingRecord.objects.filter(upload__uploaded_by=user).exclude(usage_start__isnull=True)
+    if not project:
+        return {}
+    # 1. Retrieve all billing records scoped to project with non-null usage_start
+    records = BillingRecord.objects.filter(upload__project=project).exclude(usage_start__isnull=True)
     
     # 2. Get today's local date from project timezone configuration
     today = timezone.localdate()

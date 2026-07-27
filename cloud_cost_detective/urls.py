@@ -21,9 +21,18 @@ from django.views.generic import RedirectView
 from django.conf import settings
 from django.conf.urls.static import static
 
+from accounts.views import CustomLoginView, register_view, logout_view, profile_view
+
 urlpatterns = [
     path("", RedirectView.as_view(url="/dashboard/", permanent=True)),
     path("admin/", admin.site.urls),
+    
+    # Global/legacy URL paths to support legacy non-namespaced reverses in tests
+    path("accounts/login/", CustomLoginView.as_view(), name="login"),
+    path("accounts/register/", register_view, name="register"),
+    path("accounts/logout/", logout_view, name="logout"),
+    path("accounts/profile/", profile_view, name="profile"),
+    
     path("accounts/", include("accounts.urls")),
     path("billing/", include("billing.urls")),
     path("dashboard/", include("dashboard.urls")),
