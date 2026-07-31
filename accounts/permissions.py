@@ -20,6 +20,9 @@ CAPABILITIES = {
     "MANAGE_PROJECT": ["OWNER", "ADMIN"],
     "MANAGE_MEMBERS": ["OWNER", "ADMIN"],
     "MANAGE_ORGANIZATION": ["OWNER"],
+    "MANAGE_OCI_CONNECTION": ["OWNER", "ADMIN"],
+    "RUN_OCI_SYNC": ["OWNER", "ADMIN", "ANALYST"],
+    "VIEW_OCI_CONNECTION": ["OWNER", "ADMIN", "ANALYST", "VIEWER"],
 }
 
 def has_project_permission(user, project, capability):

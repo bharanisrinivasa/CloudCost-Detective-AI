@@ -369,4 +369,311 @@ def run_waste_detection_for_project(project, actor_user=None):
             if finding.status == "OPEN":
                 results['potential_savings'][currency] = results['potential_savings'].get(currency, Decimal("0.00")) + fd['savings']
 
+    # ----------------------------------------------------
+    # OCI TELEMETRY & INVENTORY EXTENSION
+    # ----------------------------------------------------
+    from oci_connector.models import (
+        OCIConnection,
+        OCIComputeInstance,
+        OCIVolume,
+        OCIObjectStorageBucket,
+        OCIPublicIp,
+        OCILoadBalancer,
+        OCIResourceMetricSummary
+    )
+    
+    oci_conn = OCIConnection.objects.filter(project=project, is_active=True).first()
+    if oci_conn:
+        today = datetime.date.today()
+        
+        # 1. Detached Volumes
+        detached_vols = OCIVolume.objects.filter(
+            project=project,
+            connection=oci_conn,
+            inventory_status="PRESENT",
+            state="AVAILABLE",
+            attachment_state="DETACHED"
+        )
+        for vol in detached_vols:
+            vol_cost_est = Decimal(str(vol.size_in_gbs)) * Decimal("0.05")  # 5 cents per GB/month estimate
+            evidence = (
+                f"OCI inventory/attachment data observed the volume without an attachment during the latest successful authoritative scan. "
+                f"This volume is currently unattached and incurring charges. size: {vol.size_in_gbs} GB."
+            )
+            finding, created = WasteFinding.objects.update_or_create(
+                project=project,
+                waste_type="DETACHED_VOLUME",
+                resource_key=f"id:{vol.ocid}",
+                service_name="Storage",
+                currency="USD",
+                defaults={
+                    'user': actor_user,
+                    'resource_id': vol.ocid,
+                    'resource_name': vol.name,
+                    'region': vol.region,
+                    'first_seen': vol.created_at.date() if vol.created_at else today,
+                    'last_seen': today,
+                    'observation_days': 1,
+                    'calendar_span_days': 1,
+                    'coverage_ratio': Decimal("1.0"),
+                    'total_cost': vol_cost_est,
+                    'average_daily_cost': vol_cost_est / Decimal("30"),
+                    'estimated_monthly_cost': vol_cost_est,
+                    'estimated_monthly_savings': vol_cost_est,
+                    'confidence': "HIGH",
+                    'evidence': evidence
+                }
+            )
+            if created:
+                results['created'] += 1
+            else:
+                results['updated'] += 1
+            if finding.status == "OPEN":
+                results['potential_savings']["USD"] = results['potential_savings'].get("USD", Decimal("0.00")) + vol_cost_est
+
+        # 2. Idle Compute Candidate
+        IDLE_COMPUTE_MIN_DAYS = 7
+        IDLE_COMPUTE_MAX_AVG_CPU = Decimal("5.00")
+        MIN_METRIC_COVERAGE_RATIO = Decimal("0.80")
+        
+        running_vms = OCIComputeInstance.objects.filter(
+            project=project,
+            connection=oci_conn,
+            inventory_status="PRESENT",
+            state="RUNNING"
+        )
+        for vm in running_vms:
+            end_date = today
+            start_date = today - datetime.timedelta(days=IDLE_COMPUTE_MIN_DAYS)
+            metrics = OCIResourceMetricSummary.objects.filter(
+                project=project,
+                resource_id=vm.ocid,
+                metric_name="CpuUtilization",
+                date__gte=start_date,
+                date__lte=end_date
+            )
+            if len(metrics) < IDLE_COMPUTE_MIN_DAYS:
+                continue
+                
+            if any(m.coverage_ratio is None or m.coverage_ratio < MIN_METRIC_COVERAGE_RATIO for m in metrics):
+                continue
+                
+            if any(m.average_value is None for m in metrics):
+                continue
+
+            avg_cpu = sum(m.average_value for m in metrics) / len(metrics)
+            max_cpu = max(m.maximum_value for m in metrics) if any(m.maximum_value is not None for m in metrics) else None
+            
+            if avg_cpu >= IDLE_COMPUTE_MAX_AVG_CPU:
+                continue
+            if max_cpu is not None and max_cpu > Decimal("50.00"):
+                continue
+
+            rx_metrics = OCIResourceMetricSummary.objects.filter(
+                project=project, resource_id=vm.ocid, metric_name="NetworksBytesIn",
+                date__gte=start_date, date__lte=end_date
+            )
+            tx_metrics = OCIResourceMetricSummary.objects.filter(
+                project=project, resource_id=vm.ocid, metric_name="NetworksBytesOut",
+                date__gte=start_date, date__lte=end_date
+            )
+            
+            network_detail = ""
+            has_network_telemetry = (
+                len(rx_metrics) >= IDLE_COMPUTE_MIN_DAYS and
+                len(tx_metrics) >= IDLE_COMPUTE_MIN_DAYS and
+                all(m.average_value is not None and m.coverage_ratio is not None and m.coverage_ratio >= MIN_METRIC_COVERAGE_RATIO for m in rx_metrics) and
+                all(m.average_value is not None and m.coverage_ratio is not None and m.coverage_ratio >= MIN_METRIC_COVERAGE_RATIO for m in tx_metrics)
+            )
+
+            if has_network_telemetry:
+                avg_rx = sum(m.average_value for m in rx_metrics) / len(rx_metrics)
+                avg_tx = sum(m.average_value for m in tx_metrics) / len(tx_metrics)
+                network_detail = f" Network traffic shows minimal activity (Avg Rx: {avg_rx:.2f} bytes/sec, Avg Tx: {avg_tx:.2f} bytes/sec)."
+            else:
+                network_detail = " Network metrics are unavailable or have insufficient coverage."
+
+            evidence = (
+                f"OCI monitoring data confirms low observed CPU activity (Average CPU: {avg_cpu:.2f}%, Max CPU: {max_cpu if max_cpu is not None else 'N/A'}%)"
+                f" over {IDLE_COMPUTE_MIN_DAYS} observed days.{network_detail} "
+                f"Review VM shape and application workload before considering rightsizing or shutdown."
+            )
+
+            vm_cost_est = Decimal("20.00")
+            confidence = "HIGH" if has_network_telemetry else "MEDIUM"
+            
+            finding, created = WasteFinding.objects.update_or_create(
+                project=project,
+                waste_type="IDLE_COMPUTE_CANDIDATE",
+                resource_key=f"id:{vm.ocid}",
+                service_name="Compute",
+                currency="USD",
+                defaults={
+                    'user': actor_user,
+                    'resource_id': vm.ocid,
+                    'resource_name': vm.name,
+                    'region': vm.region,
+                    'first_seen': start_date,
+                    'last_seen': end_date,
+                    'observation_days': len(metrics),
+                    'calendar_span_days': IDLE_COMPUTE_MIN_DAYS,
+                    'coverage_ratio': Decimal("1.0"),
+                    'total_cost': vm_cost_est,
+                    'average_daily_cost': vm_cost_est / Decimal("30"),
+                    'estimated_monthly_cost': vm_cost_est,
+                    'estimated_monthly_savings': vm_cost_est,
+                    'confidence': confidence,
+                    'evidence': evidence
+                }
+            )
+            if created:
+                results['created'] += 1
+            else:
+                results['updated'] += 1
+            if finding.status == "OPEN":
+                results['potential_savings']["USD"] = results['potential_savings'].get("USD", Decimal("0.00")) + vm_cost_est
+
+        # 3. Possible Unassigned Public IP
+        orphan_ips = OCIPublicIp.objects.filter(
+            project=project,
+            connection=oci_conn,
+            inventory_status="PRESENT",
+            lifecycle_state="AVAILABLE",
+            is_orphan=True
+        )
+        for ip in orphan_ips:
+            ip_cost_est = Decimal("7.20")
+            evidence = (
+                f"OCI inventory reports this reserved public IP without an observed assignment during the latest successful inventory scan."
+            )
+            finding, created = WasteFinding.objects.update_or_create(
+                project=project,
+                waste_type="POSSIBLE_UNASSIGNED_PUBLIC_IP",
+                resource_key=f"id:{ip.ocid}",
+                service_name="Networking",
+                currency="USD",
+                defaults={
+                    'user': actor_user,
+                    'resource_id': ip.ocid,
+                    'resource_name': ip.ip_address,
+                    'region': ip.region,
+                    'first_seen': ip.created_at.date() if ip.created_at else today,
+                    'last_seen': today,
+                    'observation_days': 1,
+                    'calendar_span_days': 1,
+                    'coverage_ratio': Decimal("1.0"),
+                    'total_cost': ip_cost_est,
+                    'average_daily_cost': ip_cost_est / Decimal("30"),
+                    'estimated_monthly_cost': ip_cost_est,
+                    'estimated_monthly_savings': ip_cost_est,
+                    'confidence': "HIGH",
+                    'evidence': evidence
+                }
+            )
+            if created:
+                results['created'] += 1
+            else:
+                results['updated'] += 1
+            if finding.status == "OPEN":
+                results['potential_savings']["USD"] = results['potential_savings'].get("USD", Decimal("0.00")) + ip_cost_est
+
+        # 4. Possible Empty Storage Buckets
+        empty_buckets = OCIObjectStorageBucket.objects.filter(
+            project=project,
+            connection=oci_conn,
+            inventory_status="PRESENT",
+            approximate_count=0
+        )
+        for b in empty_buckets:
+            evidence = (
+                f"OCI Object Storage check confirms bucket '{b.name}' in namespace '{b.namespace}' "
+                f"has approximate object count of authoritatively 0. This bucket is empty. "
+                f"Review usage patterns before considering cleanup."
+            )
+            finding, created = WasteFinding.objects.update_or_create(
+                project=project,
+                waste_type="POSSIBLE_EMPTY_BUCKET",
+                resource_key=f"name:{b.namespace}:{b.name}",
+                service_name="Object Storage",
+                currency="USD",
+                defaults={
+                    'user': actor_user,
+                    'resource_id': b.name,
+                    'resource_name': b.name,
+                    'region': b.region,
+                    'first_seen': b.created_at.date() if b.created_at else today,
+                    'last_seen': today,
+                    'observation_days': 1,
+                    'calendar_span_days': 1,
+                    'coverage_ratio': Decimal("1.0"),
+                    'total_cost': Decimal("0.00"),
+                    'average_daily_cost': Decimal("0.00"),
+                    'estimated_monthly_cost': Decimal("0.00"),
+                    'estimated_monthly_savings': Decimal("0.00"),
+                    'confidence': "HIGH",
+                    'evidence': evidence
+                }
+            )
+            if created:
+                results['created'] += 1
+            else:
+                results['updated'] += 1
+            if finding.status == "OPEN":
+                results['potential_savings']["USD"] = results['potential_savings'].get("USD", Decimal("0.00")) + Decimal("0.00")
+
+        # 5. Idle Load Balancers
+        idle_lbs = OCILoadBalancer.objects.filter(
+            project=project,
+            connection=oci_conn,
+            inventory_status="PRESENT",
+            state="ACTIVE"
+        )
+        for lb in idle_lbs:
+            lb_metrics = OCIResourceMetricSummary.objects.filter(
+                project=project,
+                resource_id=lb.ocid,
+                metric_name="ActiveConnections",
+                date__gte=today - datetime.timedelta(days=7),
+                date__lte=today
+            )
+            if (len(lb_metrics) >= 7 and
+                all(m.average_value is not None and m.coverage_ratio is not None and m.coverage_ratio >= MIN_METRIC_COVERAGE_RATIO for m in lb_metrics) and
+                all(m.average_value == Decimal("0.00") for m in lb_metrics)):
+                
+                lb_cost_est = Decimal("15.00")
+                evidence = (
+                    f"OCI load balancer check shows active connections count was average zero over the last 7 days. "
+                    f"Load balancer is active but idle. Verify traffic requirements before stopping or deleting."
+                )
+                finding, created = WasteFinding.objects.update_or_create(
+                    project=project,
+                    waste_type="IDLE_LOAD_BALANCER_CANDIDATE",
+                    resource_key=f"id:{lb.ocid}",
+                    service_name="Networking",
+                    currency="USD",
+                    defaults={
+                        'user': actor_user,
+                        'resource_id': lb.ocid,
+                        'resource_name': lb.name,
+                        'region': lb.region,
+                        'first_seen': today - datetime.timedelta(days=7),
+                        'last_seen': today,
+                        'observation_days': len(lb_metrics),
+                        'calendar_span_days': 7,
+                        'coverage_ratio': Decimal("1.0"),
+                        'total_cost': lb_cost_est,
+                        'average_daily_cost': lb_cost_est / Decimal("30"),
+                        'estimated_monthly_cost': lb_cost_est,
+                        'estimated_monthly_savings': lb_cost_est,
+                        'confidence': "HIGH",
+                        'evidence': evidence
+                    }
+                )
+                if created:
+                    results['created'] += 1
+                else:
+                    results['updated'] += 1
+                if finding.status == "OPEN":
+                    results['potential_savings']["USD"] = results['potential_savings'].get("USD", Decimal("0.00")) + lb_cost_est
+
     return results

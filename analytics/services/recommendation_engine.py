@@ -102,6 +102,30 @@ def run_recommendation_engine_for_project(project, actor_user=None):
                     "This recommendation is based entirely on historical billing patterns. "
                     "Validate actual workload utilization before changing instances."
                 )
+            elif wf.waste_type == "IDLE_COMPUTE_CANDIDATE":
+                rec_type = "RIGHTSIZE_REVIEW"
+                rec_action = "Review VM shape and application workload before considering rightsizing or shutdown."
+                limitation_text = (
+                    "OCI monitoring data confirms low observed CPU activity during the analyzed period. "
+                    "Review workload requirements, memory demand, network behavior, and availability requirements "
+                    "before resizing or stopping the resource."
+                )
+            elif wf.waste_type == "DETACHED_VOLUME":
+                rec_type = "STORAGE_OPTIMIZATION"
+                rec_action = "Verify if this volume is no longer needed. Consider creating a backup and deleting it if it is obsolete."
+                limitation_text = "Verify attachment state in OCI Console. Storage volume is reported detached."
+            elif wf.waste_type == "POSSIBLE_UNASSIGNED_PUBLIC_IP":
+                rec_type = "COST_PATTERN_REVIEW"
+                rec_action = "Review if this public IP can be released. Unassigned reserved public IPs accrue hourly charges."
+                limitation_text = "Verify that the IP is not needed for future dynamic allocations."
+            elif wf.waste_type == "POSSIBLE_EMPTY_BUCKET":
+                rec_type = "STORAGE_OPTIMIZATION"
+                rec_action = "Review if this Object Storage bucket is obsolete. If empty and unused, consider removing it."
+                limitation_text = "Object Storage count is verified as zero."
+            elif wf.waste_type == "IDLE_LOAD_BALANCER_CANDIDATE":
+                rec_type = "RIGHTSIZE_REVIEW"
+                rec_action = "Verify if this load balancer is still in use. It has zero recorded connections over the last 7 days."
+                limitation_text = "Review traffic metrics and connection details before terminating."
             elif wf.waste_type in ["POSSIBLE_UNUSED_STORAGE", "STALE_RESOURCE_COST"]:
                 rec_type = "STORAGE_OPTIMIZATION"
                 rec_action = (

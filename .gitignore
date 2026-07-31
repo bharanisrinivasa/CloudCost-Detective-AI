@@ -10,6 +10,8 @@ env/
 
 # Environment Variables
 .env
+*.pem
+*.key
 
 # Database
 db.sqlite3

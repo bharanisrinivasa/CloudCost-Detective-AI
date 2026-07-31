@@ -294,3 +294,57 @@ class Module13RegressionTestCase(TestCase):
         # Provision second time
         org2, membership2, proj2 = provision_default_tenant(user)
         self.assertIsNone(org2) # Returns None, None, None because it detects existing membership
+
+    def test_tenant_provisioning_database_error_rolls_back_and_raises(self):
+        """Database error in tenant provisioning triggers complete rollback and re-raises exception."""
+        user = User.objects.create_user(username="db_error_user", email="dberror@example.com", password="password")
+        
+        # Clean auto-created tenant for user
+        OrganizationMembership.objects.filter(user=user).delete()
+        org_name = f"{user.username}'s Org"
+        Organization.objects.filter(name=org_name).delete()
+        
+        # Patch Project.objects.get_or_create to raise DatabaseError
+        from unittest.mock import patch
+        from django.db import DatabaseError
+        
+        with patch("accounts.services.tenant_service.Project.objects.get_or_create", side_effect=DatabaseError("Unexpected DB Error")):
+            with self.assertRaises(DatabaseError):
+                provision_default_tenant(user)
+                
+        # Check that organization created inside the transaction was rolled back
+        org_name = f"{user.username}'s Org"
+        self.assertFalse(Organization.objects.filter(name=org_name).exists())
+
+    def test_owner_can_promote_to_owner(self):
+        """OWNER can promote an eligible member to OWNER."""
+        self.client.login(username="owner_user", password="password")
+        session = self.client.session
+        session["active_project_id"] = self.project1_a.id
+        session.save()
+        
+        # Update admin to OWNER
+        update_url = reverse("accounts:update-member-role", kwargs={"membership_id": self.admin_membership.id})
+        response = self.client.post(update_url, {"role": "OWNER"})
+        self.assertEqual(response.status_code, 302)
+        
+        # Verify the database state
+        self.admin_membership.refresh_from_db()
+        self.assertEqual(self.admin_membership.role, "OWNER")
+
+    def test_admin_cannot_modify_owner(self):
+        """ADMIN cannot modify/demote or remove an OWNER."""
+        self.client.login(username="admin_user", password="password")
+        session = self.client.session
+        session["active_project_id"] = self.project1_a.id
+        session.save()
+        
+        # Try to demote OWNER to ADMIN
+        update_url = reverse("accounts:update-member-role", kwargs={"membership_id": self.owner_membership.id})
+        response = self.client.post(update_url, {"role": "ADMIN"})
+        self.assertEqual(response.status_code, 403)
+        
+        # Try to remove OWNER
+        remove_url = reverse("accounts:remove-member", kwargs={"membership_id": self.owner_membership.id})
+        response = self.client.post(remove_url)
+        self.assertEqual(response.status_code, 403)

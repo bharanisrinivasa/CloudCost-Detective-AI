@@ -56,7 +56,17 @@ def backfill_orgs_and_projects(apps, schema_editor):
         ChatSession.objects.filter(user=user).update(project=proj)
         
         # Update recommendation fingerprints deterministically with the new project formula
-        for rec in Recommendation.objects.filter(project=proj):
+        recs = list(Recommendation.objects.filter(project=proj))
+        
+        def rec_sort_key(r):
+            status_score = 3 if r.status == "OPEN" else (2 if r.status == "IMPLEMENTED" else 1)
+            has_explanation = 1 if (r.ai_explanation_json or r.ai_explanation_hash) else 0
+            savings = float(r.estimated_monthly_savings) if r.estimated_monthly_savings is not None else 0.0
+            return (status_score, has_explanation, savings, -r.id)
+            
+        recs.sort(key=rec_sort_key, reverse=True)
+        
+        for rec in recs:
             raw_str = f"{proj.id}|{rec.recommendation_type}|{rec.recommendation_scope}|{rec.source_type or ''}|{rec.source_id or ''}|{rec.identity_type}|{rec.identity_value}|{rec.service_name}|{rec.region}|{rec.currency}"
             fp = hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
             if fp in seen_fingerprints:

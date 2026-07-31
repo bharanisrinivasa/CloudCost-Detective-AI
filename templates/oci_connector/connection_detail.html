@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}OCI Connection Configuration - CloudCost Detective{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Glassmorphic dark card styles */
+    .glass-card {
+        background: rgba(30, 34, 45, 0.7);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        color: #f1f3f5;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    }
+    .glass-header {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(40, 45, 60, 0.4);
+    }
+    .stat-card {
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .stat-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 24px rgba(0, 224, 255, 0.15);
+    }
+    .log-table {
+        color: #e9ecef;
+    }
+    .log-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .badge-completed {
+        background-color: #2b8a3e;
+        color: #ebfbee;
+    }
+    .badge-partial {
+        background-color: #e8590c;
+        color: #fff9db;
+    }
+    .badge-failed {
+        background-color: #c92a2a;
+        color: #fff5f5;
+    }
+    .badge-processing {
+        background-color: #1c7ed6;
+        color: #e7f5ff;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    <!-- Breadcrumb -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'dashboard-home' %}" class="text-info text-decoration-none">Dashboard</a></li>
+                    <li class="breadcrumb-item active text-light" aria-current="page">OCI Connection</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Active Project Details Banner -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="p-3 mb-2 bg-dark rounded-3 d-flex align-items-center justify-content-between border border-secondary shadow-sm">
+                <div>
+                    <h5 class="mb-0 text-light"><i class="fa-solid fa-folder-open me-2 text-info"></i>Active Project: {{ active_project.name }}</h5>
+                    <small class="text-muted">All OCI integrations and discovered resources are isolated under this project boundary.</small>
+                </div>
+                <div>
+                    <span class="badge bg-secondary py-2 px-3 text-sm">Role: {{ active_project.organization.name }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Configuration Form and Connection Details -->
+        <div class="col-lg-7 mb-4">
+            <div class="card glass-card shadow-sm h-100">
+                <div class="card-header glass-header py-3">
+                    <h5 class="card-title mb-0 text-info"><i class="fa-solid fa-cloud me-2"></i>OCI SDK Configuration Setup</h5>
+                </div>
+                <div class="card-body">
+                    {% if not connection %}
+                        <div class="alert alert-info border-0 bg-opacity-10 text-info shadow-sm mb-4">
+                            <i class="fa-solid fa-circle-info me-2"></i>No OCI Connection configured for this project. Setup OCI credentials below to start scanning resources.
+                        </div>
+                    {% endif %}
+
+                    {% if can_manage %}
+                        <form method="POST" action="">
+                            {% csrf_token %}
+                            <div class="row g-3">
+                                <div class="col-md-12">
+                                    <label class="form-label text-light">Connection Display Name</label>
+                                    <input type="text" name="name" class="form-control bg-dark text-light border-secondary" placeholder="e.g. Production Sub-Tenancy" value="{{ connection.name|default:'' }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-light">Tenancy OCID</label>
+                                    <input type="text" name="tenancy_ocid" class="form-control bg-dark text-light border-secondary" placeholder="ocid1.tenancy.oc1..." value="{{ connection.tenancy_ocid|default:'' }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-light">User OCID</label>
+                                    <input type="text" name="user_ocid" class="form-control bg-dark text-light border-secondary" placeholder="ocid1.user.oc1..." value="{{ connection.user_ocid|default:'' }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-light">API Key Fingerprint</label>
+                                    <input type="text" name="fingerprint" class="form-control bg-dark text-light border-secondary" placeholder="00:11:22:33..." value="{{ connection.fingerprint|default:'' }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-light">Default Region</label>
+                                    <input type="text" name="region" class="form-control bg-dark text-light border-secondary" placeholder="us-ashburn-1" value="{{ connection.region|default:'us-ashburn-1' }}" required>
+                                </div>
+                                <div class="col-md-12">
+                                    <label class="form-label text-light">Root Compartment OCID</label>
+                                    <input type="text" name="compartment_ocid" class="form-control bg-dark text-light border-secondary" placeholder="ocid1.compartment.oc1..." value="{{ connection.compartment_ocid|default:'' }}" required>
+                                    <div class="form-text text-muted">The sync process will scan this compartment and all its descendants recursively.</div>
+                                </div>
+                                <div class="col-md-12">
+                                    <label class="form-label text-light">API Private Key (PEM format)</label>
+                                    <textarea name="private_key" rows="6" class="form-control bg-dark text-light border-secondary" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----">{% if connection %}********{% endif %}</textarea>
+                                    <div class="form-text text-muted">For your security, credentials are encrypted on disk. If updating other settings, leave this field as <code>********</code> to keep the existing key.</div>
+                                </div>
+                                <div class="col-12 mt-4 text-end">
+                                    <button type="submit" class="btn btn-info py-2 px-4 shadow-sm"><i class="fa-solid fa-save me-2"></i>Save Configuration</button>
+                                </div>
+                            </div>
+                        </form>
+                    {% else %}
+                        <!-- Read-only View for Viewers/Analysts -->
+                        <div class="row g-3">
+                            <div class="col-md-12">
+                                <label class="form-label text-muted">Connection Display Name</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary">{{ connection.name }}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted">Tenancy OCID</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary text-truncate">{{ connection.tenancy_ocid }}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted">User OCID</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary text-truncate">{{ connection.user_ocid }}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted">Fingerprint</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary">{{ connection.fingerprint }}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted">Region</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary">{{ connection.region }}</div>
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label text-muted">Root Compartment OCID</label>
+                                <div class="p-2 bg-dark rounded text-light border border-secondary text-truncate">{{ connection.compartment_ocid }}</div>
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label text-muted">Private Key Status</label>
+                                <div class="p-2 bg-dark rounded text-info border border-secondary"><i class="fa-solid fa-lock me-2"></i>Encrypted & Masked (********)</div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Diagnostics & Synchronization Panel -->
+        <div class="col-lg-5 mb-4">
+            <!-- Diagnostics card -->
+            <div class="card glass-card shadow-sm mb-4">
+                <div class="card-header glass-header py-3">
+                    <h5 class="card-title mb-0 text-info"><i class="fa-solid fa-heartbeat me-2"></i>OCI Connection Status</h5>
+                </div>
+                <div class="card-body text-center py-4">
+                    {% if not connection %}
+                        <div class="py-3">
+                            <i class="fa-solid fa-cloud-slash fa-3x text-muted mb-3"></i>
+                            <h6 class="text-light">Not Integrated</h6>
+                            <p class="text-muted mb-0 small">OCI Connection has not been set up yet.</p>
+                        </div>
+                    {% else %}
+                        <div class="mb-3">
+                            <i class="fa-solid fa-cloud-check fa-4x text-info mb-3"></i>
+                            <h5 class="text-light mb-1">{{ connection.name }}</h5>
+                            <span class="badge bg-success"><i class="fa-solid fa-check-circle me-1"></i>Active</span>
+                        </div>
+
+                        <div class="d-flex justify-content-center gap-2 mt-4">
+                            <button type="button" id="btn-test-connection" class="btn btn-secondary-custom btn-sm py-2 px-3">
+                                <i class="fa-solid fa-vial me-2"></i>Test Integration
+                            </button>
+                            {% if can_sync %}
+                                <button type="button" id="btn-trigger-sync" class="btn btn-info btn-sm py-2 px-3">
+                                    <i class="fa-solid fa-sync me-2"></i>Sync Now
+                                </button>
+                            {% endif %}
+                        </div>
+
+                        <!-- Staged tests results area -->
+                        <div id="diagnostics-stages" class="mt-4 text-start border-top border-secondary pt-3" style="display: none;">
+                            <h6 class="text-info mb-3 small uppercase font-weight-bold">IAM Capability Check Stages:</h6>
+                            <ul class="list-group list-group-flush bg-transparent">
+                                <!-- Generated Dynamically -->
+                            </ul>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Live Inventory Summary card -->
+            {% if connection %}
+                <div class="card glass-card shadow-sm">
+                    <div class="card-header glass-header py-3">
+                        <h5 class="card-title mb-0 text-info"><i class="fa-solid fa-cubes me-2"></i>Project OCI Inventory</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <div class="p-3 bg-dark bg-opacity-50 rounded text-center border border-secondary stat-card">
+                                    <i class="fa-solid fa-server text-info mb-2"></i>
+                                    <h4 class="mb-0 text-light font-weight-bold">{{ inventory.instances }}</h4>
+                                    <small class="text-muted">Compute VMs</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 bg-dark bg-opacity-50 rounded text-center border border-secondary stat-card">
+                                    <i class="fa-solid fa-hdd text-info mb-2"></i>
+                                    <h4 class="mb-0 text-light font-weight-bold">{{ inventory.volumes }}</h4>
+                                    <small class="text-muted">Block Volumes</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 bg-dark bg-opacity-50 rounded text-center border border-secondary stat-card">
+                                    <i class="fa-solid fa-box-open text-info mb-2"></i>
+                                    <h4 class="mb-0 text-light font-weight-bold">{{ inventory.buckets }}</h4>
+                                    <small class="text-muted">OS Buckets</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 bg-dark bg-opacity-50 rounded text-center border border-secondary stat-card">
+                                    <i class="fa-solid fa-network-wired text-info mb-2"></i>
+                                    <h4 class="mb-0 text-light font-weight-bold">{{ inventory.public_ips }}</h4>
+                                    <small class="text-muted">Public IPs</small>
+                                </div>
+                            </div>
+                            <div class="col-12 mt-2">
+                                <div class="p-3 bg-dark bg-opacity-50 rounded text-center border border-secondary stat-card">
+                                    <i class="fa-solid fa-network-wired text-info mb-2"></i>
+                                    <span class="h4 mb-0 text-light font-weight-bold me-2">{{ inventory.load_balancers }}</span>
+                                    <small class="text-muted">Load Balancers</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sync Logs History -->
+    {% if connection %}
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card glass-card shadow-sm">
+                    <div class="card-header glass-header py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0 text-info"><i class="fa-solid fa-history me-2"></i>Synchronization Log History</h5>
+                        <small class="text-muted">Recent OCI Background & Manual Sync Executions</small>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover log-table mb-0 align-middle">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Sync Type</th>
+                                        <th>Status</th>
+                                        <th>Records Created</th>
+                                        <th>Records Updated</th>
+                                        <th>Started At</th>
+                                        <th>Completed At</th>
+                                        <th>Logs</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="border-top-0">
+                                    {% for log in sync_logs %}
+                                        <tr>
+                                            <td>
+                                                <i class="fa-solid {% if log.sync_type == 'ALL' %}fa-arrows-spin{% elif log.sync_type == 'COST' %}fa-dollar-sign{% elif log.sync_type == 'INVENTORY' %}fa-boxes{% else %}fa-chart-simple{% endif %} text-info me-2"></i>
+                                                {{ log.get_sync_type_display }}
+                                            </td>
+                                            <td>
+                                                <span class="badge {% if log.status == 'COMPLETED' %}badge-completed{% elif log.status == 'PARTIAL' %}badge-partial{% elif log.status == 'FAILED' %}badge-failed{% else %}badge-processing{% endif %}">
+                                                    {{ log.get_status_display }}
+                                                </span>
+                                            </td>
+                                            <td>{{ log.records_created }}</td>
+                                            <td>{{ log.records_updated }}</td>
+                                            <td>{{ log.started_at|date:"Y-m-d H:i:s" }}</td>
+                                            <td>{{ log.completed_at|date:"Y-m-d H:i:s"|default:"-" }}</td>
+                                            <td>
+                                                {% if log.warning_summary or log.error_summary %}
+                                                    <button type="button" class="btn btn-outline-info btn-xs py-1 px-2 text-xs" data-bs-toggle="collapse" data-bs-target="#log-details-{{ log.id }}">
+                                                        Show Details
+                                                    </button>
+                                                {% else %}
+                                                    <span class="text-muted small">No logs</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% if log.warning_summary or log.error_summary %}
+                                            <tr class="collapse bg-dark bg-opacity-25" id="log-details-{{ log.id }}">
+                                                <td colspan="7">
+                                                    <div class="p-3 text-light font-monospace small" style="white-space: pre-wrap;">
+                                                        {% if log.error_summary %}
+                                                            <div class="text-danger mb-2"><strong>Errors:</strong><br>{{ log.error_summary }}</div>
+                                                        {% endif %}
+                                                        {% if log.warning_summary %}
+                                                            <div class="text-warning"><strong>Warnings:</strong><br>{{ log.warning_summary }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    {% empty %}
+                                        <tr>
+                                            <td colspan="7" class="text-center py-4 text-muted">No synchronization logs available.</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const btnTest = document.getElementById("btn-test-connection");
+        const btnSync = document.getElementById("btn-trigger-sync");
+        const stagesContainer = document.getElementById("diagnostics-stages");
+
+        if (btnTest) {
+            btnTest.addEventListener("click", function() {
+                btnTest.disabled = true;
+                btnTest.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Testing...';
+                stagesContainer.style.display = "block";
+                
+                const ul = stagesContainer.querySelector("ul");
+                ul.innerHTML = '<li class="list-group-item bg-transparent text-light border-0 py-1"><i class="fa-solid fa-circle-notch fa-spin me-2 text-info"></i>Executing connection diagnostics...</li>';
+
+                fetch("{% url 'oci_connector:test-connection' %}", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": "{{ csrf_token }}",
+                        "Content-Type": "application/json"
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    ul.innerHTML = "";
+                    btnTest.disabled = false;
+                    btnTest.innerHTML = '<i class="fa-solid fa-vial me-2"></i>Test Integration';
+
+                    if (data.error) {
+                        ul.innerHTML = `<li class="list-group-item bg-transparent text-danger border-0 py-1"><i class="fa-solid fa-times-circle me-2"></i>${data.error}</li>`;
+                        return;
+                    }
+
+                    Object.keys(data.stages).forEach(stage => {
+                        const status = data.stages[stage];
+                        let icon = '<i class="fa-solid fa-check-circle text-success me-2"></i>';
+                        let textColor = 'text-light';
+
+                        if (status.startsWith("FAILED")) {
+                            icon = '<i class="fa-solid fa-times-circle text-danger me-2"></i>';
+                            textColor = 'text-danger';
+                        } else if (status.startsWith("WARNING")) {
+                            icon = '<i class="fa-solid fa-exclamation-triangle text-warning me-2"></i>';
+                            textColor = 'text-warning';
+                        }
+
+                        ul.innerHTML += `<li class="list-group-item bg-transparent ${textColor} border-0 py-1 d-flex justify-content-between">
+                            <span>${icon}${stage}</span>
+                            <span class="font-monospace small">${status}</span>
+                        </li>`;
+                    });
+                })
+                .catch(err => {
+                    btnTest.disabled = false;
+                    btnTest.innerHTML = '<i class="fa-solid fa-vial me-2"></i>Test Integration';
+                    ul.innerHTML = '<li class="list-group-item bg-transparent text-danger border-0 py-1"><i class="fa-solid fa-times-circle me-2"></i>Failed to connect to test server.</li>';
+                });
+            });
+        }
+
+        if (btnSync) {
+            btnSync.addEventListener("click", function() {
+                btnSync.disabled = true;
+                btnSync.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Syncing...';
+
+                fetch("{% url 'oci_connector:trigger-sync' %}", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": "{{ csrf_token }}",
+                        "Content-Type": "application/json"
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    btnSync.disabled = false;
+                    btnSync.innerHTML = '<i class="fa-solid fa-sync me-2"></i>Sync Now';
+
+                    if (data.error) {
+                        alert("Sync Failed: " + data.error);
+                    } else {
+                        alert("Sync Triggered: " + data.message);
+                        window.location.reload();
+                    }
+                })
+                .catch(err => {
+                    btnSync.disabled = false;
+                    btnSync.innerHTML = '<i class="fa-solid fa-sync me-2"></i>Sync Now';
+                    alert("Communication error triggering OCI synchronization.");
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}

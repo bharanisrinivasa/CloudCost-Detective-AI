@@ -1,16 +1,31 @@
 import os
+import base64
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(BASE_DIR / ".env")
 
-SECRET_KEY = env("SECRET_KEY", default="django-insecure-36m0b016f(m^5&0)s-@de=v&wmxwot^o%ts3!5f@fbbrw$jf8&")
-DEBUG = env("DEBUG", default=True)
-ALLOWED_HOSTS = ["*"]
+development_default_key = "django-insecure-36m0b016f(m^5&0)s-@de=v&wmxwot^o%ts3!5f@fbbrw$jf8&"
+SECRET_KEY = env("SECRET_KEY", default=development_default_key)
+DEBUG = env.bool("DEBUG", default=False)
+
+if not DEBUG and (not SECRET_KEY or SECRET_KEY == development_default_key):
+    raise ImproperlyConfigured("SECRET_KEY must be explicitly configured in production.")
+
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
+if not DEBUG:
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured("ALLOWED_HOSTS must be explicitly configured when DEBUG=False.")
+else:
+    if not ALLOWED_HOSTS:
+        ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -74,6 +89,14 @@ DATABASES = {
     }
 }
 
+if not DEBUG:
+    engine = DATABASES["default"]["ENGINE"]
+    if engine != "django.db.backends.postgresql":
+        raise ImproperlyConfigured(f"Production database engine must be PostgreSQL, got '{engine}'.")
+    for key in ["NAME", "USER", "PASSWORD", "HOST"]:
+        if not DATABASES["default"].get(key):
+            raise ImproperlyConfigured(f"Production database setting '{key}' must be explicitly configured.")
+
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -90,6 +113,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -105,6 +129,69 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://localhost:
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
 GEMINI_MODEL = env("GEMINI_MODEL", default="gemini-2.5-flash")
 
+# OCI Integration Configuration
+OCI_ENCRYPTION_KEY = env("OCI_ENCRYPTION_KEY", default="")
+
+if not DEBUG:
+    if not OCI_ENCRYPTION_KEY:
+        raise ImproperlyConfigured("OCI_ENCRYPTION_KEY must be configured in production.")
+    try:
+        key_bytes = base64.urlsafe_b64decode(OCI_ENCRYPTION_KEY)
+        if len(key_bytes) != 32:
+            raise ValueError()
+    except Exception:
+        raise ImproperlyConfigured("OCI_ENCRYPTION_KEY must be a valid 32-byte URL-safe base64 key.")
+
 # Custom Test Runner for automatic tenancy backfilling in legacy tests
 TEST_RUNNER = "cloud_cost_detective.test_runner.CustomDiscoverRunner"
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=not DEBUG)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "verbose" if not DEBUG else "simple",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
+CELERY_BEAT_SCHEDULE = {
+    "sync-active-oci-connections-daily": {
+        "task": "oci_connector.tasks.sync_all_active_connections_task",
+        "schedule": 86400.0,
+    },
+}
 

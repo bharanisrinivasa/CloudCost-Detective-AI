@@ -106,6 +106,40 @@ class CostAnomaly(models.Model):
                 project = Project.objects.filter(organization__memberships__user=self.user).first()
                 if project:
                     self.project = project
+        
+        # OCI correlation check
+        if self.project_id and self.detected_date:
+            try:
+                from oci_connector.models import OCIComputeInstance, OCIVolume, OCIConnection
+                if OCIConnection.objects.filter(project=self.project, is_active=True).exists():
+                    import datetime
+                    start_dt = datetime.datetime.combine(self.detected_date - datetime.timedelta(days=1), datetime.time.min, tzinfo=datetime.timezone.utc)
+                    end_dt = datetime.datetime.combine(self.detected_date + datetime.timedelta(days=1), datetime.time.max, tzinfo=datetime.timezone.utc)
+                    
+                    created_instances = OCIComputeInstance.objects.filter(
+                        project=self.project,
+                        created_at__gte=start_dt,
+                        created_at__lte=end_dt
+                    )
+                    created_volumes = OCIVolume.objects.filter(
+                        project=self.project,
+                        created_at__gte=start_dt,
+                        created_at__lte=end_dt
+                    )
+                    
+                    evidence = []
+                    for inst in created_instances:
+                        evidence.append(f"compute instance '{inst.name}' was provisioned during the anomaly window (possible correlated evidence)")
+                    for vol in created_volumes:
+                        evidence.append(f"block/boot volume '{vol.name}' was provisioned during the anomaly window (possible correlated evidence)")
+                    
+                    if evidence:
+                        cor_str = " - Correlated OCI Events: " + ", ".join(evidence)
+                        if cor_str not in self.description:
+                            self.description += cor_str
+            except Exception:
+                pass
+
         super().save(*args, **kwargs)
 
 
@@ -125,6 +159,11 @@ class WasteFinding(models.Model):
         ("DORMANT_COST_PATTERN", "Dormant Cost Pattern"),
         ("STALE_RESOURCE_COST", "Stale Resource Cost"),
         ("POSSIBLE_UNUSED_STORAGE", "Possible Unused Storage"),
+        ("IDLE_COMPUTE_CANDIDATE", "Idle Compute Candidate"),
+        ("DETACHED_VOLUME", "Detached Volume"),
+        ("POSSIBLE_UNASSIGNED_PUBLIC_IP", "Possible Unassigned Public IP"),
+        ("IDLE_LOAD_BALANCER_CANDIDATE", "Idle Load Balancer Candidate"),
+        ("POSSIBLE_EMPTY_BUCKET", "Possible Empty Bucket"),
     )
     
     user = models.ForeignKey(

@@ -52,6 +52,9 @@ def provision_default_tenant(user):
             )
             
             return org, membership, project
-    except DatabaseError as e:
-        logger.warning("DatabaseError during default tenant provisioning: %s", e)
-        return None, None, None
+    except DatabaseError:
+        logger.exception(
+            "DatabaseError during default tenant provisioning for user_id=%s",
+            user.pk
+        )
+        raise

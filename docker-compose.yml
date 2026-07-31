@@ -1,33 +1,136 @@
 version: "3.9"
+
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
-      POSTGRES_DB: cloudcost
-      POSTGRES_USER: cloudcost
-      POSTGRES_PASSWORD: cloudcost
-    ports:
-      - "5432:5432"
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
-  web:
-    build: .
-    command: python manage.py runserver 0.0.0.0:8000
-    environment:
-      DB_ENGINE: django.db.backends.postgresql
-      DB_NAME: cloudcost
-      DB_USER: cloudcost
-      DB_PASSWORD: cloudcost
-      DB_HOST: db
-      DB_PORT: 5432
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      POSTGRES_DB: ${DB_NAME:-cloudcost}
+      POSTGRES_USER: ${DB_USER:-cloudcost}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cloudcost}
     volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    expose:
+      - "6379"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: gunicorn -c deployment/gunicorn.conf.py cloud_cost_detective.wsgi:application
+    environment:
+      - DEBUG=False
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-cloudcost}
+      - DB_USER=${DB_USER:-cloudcost}
+      - DB_PASSWORD=${DB_PASSWORD:-cloudcost}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - OCI_ENCRYPTION_KEY=${OCI_ENCRYPTION_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-True}
+      - CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE:-True}
+      - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT:-False}
+      - SECURE_HSTS_SECONDS=${SECURE_HSTS_SECONDS:-0}
+      - SECURE_HSTS_INCLUDE_SUBDOMAINS=${SECURE_HSTS_INCLUDE_SUBDOMAINS:-False}
+      - SECURE_HSTS_PRELOAD=${SECURE_HSTS_PRELOAD:-False}
+    volumes:
+      - staticfiles:/app/staticfiles
+      - media:/app/media
+    expose:
+      - "8000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A cloud_cost_detective worker --loglevel=info
+    environment:
+      - DEBUG=False
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-cloudcost}
+      - DB_USER=${DB_USER:-cloudcost}
+      - DB_PASSWORD=${DB_PASSWORD:-cloudcost}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - OCI_ENCRYPTION_KEY=${OCI_ENCRYPTION_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+    volumes:
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A cloud_cost_detective beat --loglevel=info
+    environment:
+      - DEBUG=False
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-cloudcost}
+      - DB_USER=${DB_USER:-cloudcost}
+      - DB_PASSWORD=${DB_PASSWORD:-cloudcost}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - OCI_ENCRYPTION_KEY=${OCI_ENCRYPTION_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./deployment/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - staticfiles:/app/staticfiles:ro
+      - media:/app/media:ro
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  staticfiles:
+  media:

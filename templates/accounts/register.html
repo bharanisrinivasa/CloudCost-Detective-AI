@@ -48,7 +48,16 @@
                                     {{ field.label }}
                                 </label>
                                 
-                                {{ field }}
+                                {% if 'password' in field.name %}
+                                    <div class="input-group">
+                                        {{ field }}
+                                        <button class="btn btn-outline-secondary toggle-password-btn" type="button" tabindex="-1" style="border-color: rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.03); color: var(--text-secondary);">
+                                            <i class="fa-solid fa-eye"></i>
+                                        </button>
+                                    </div>
+                                {% else %}
+                                    {{ field }}
+                                {% endif %}
                                 
                                 {% if field.help_text %}
                                     <div class="form-text text-secondary">{{ field.help_text|safe }}</div>
@@ -81,4 +90,28 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const toggleButtons = document.querySelectorAll('.toggle-password-btn');
+    toggleButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const input = btn.closest('.input-group').querySelector('input');
+            const icon = btn.querySelector('i');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        });
+    });
+});
+</script>
 {% endblock %}

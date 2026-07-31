@@ -30,6 +30,7 @@ class BillingUpload(models.Model):
     UPLOAD_TYPE_CHOICES = (
         ("Billing Report", "Billing Report"),
         ("Usage Report", "Usage Report"),
+        ("OCI API Sync", "OCI API Sync"),
     )
 
     UPLOAD_STATUS_CHOICES = (
@@ -144,6 +145,7 @@ class BillingRecord(models.Model):
     service = models.CharField(max_length=200)
     resource_name = models.CharField(max_length=255, blank=True, default="")
     resource_id = models.CharField(max_length=500)
+    source_fingerprint = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     compartment = models.CharField(max_length=200)
     region = models.CharField(max_length=200)
     availability_domain = models.CharField(max_length=100, blank=True, default="")

@@ -22,10 +22,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 from accounts.views import CustomLoginView, register_view, logout_view, profile_view
+from cloud_cost_detective.views import health_check, readiness_check
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/dashboard/", permanent=True)),
     path("admin/", admin.site.urls),
+    
+    path("health/", health_check, name="health-check"),
+    path("ready/", readiness_check, name="readiness-check"),
     
     # Global/legacy URL paths to support legacy non-namespaced reverses in tests
     path("accounts/login/", CustomLoginView.as_view(), name="login"),
@@ -40,6 +44,7 @@ urlpatterns = [
     path("ai-engine/", include("ai_engine.urls")),
     path("ai/", include("ai_engine.urls")),
     path("api/", include("api.urls")),
+    path("oci/", include("oci_connector.urls")),
 ]
 
 if settings.DEBUG:

@@ -13,15 +13,18 @@
         padding: 0.6rem 1rem;
         transition: var(--transition-smooth);
     }
+
     .filter-input:focus {
         background: rgba(255, 255, 255, 0.08);
         border-color: var(--accent-color);
         box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
     }
+
     .filter-input option {
         background: var(--bg-secondary);
         color: var(--text-primary);
     }
+
     .kpi-card {
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.05) 100%);
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -29,13 +32,16 @@
         padding: 1.5rem;
         transition: var(--transition-smooth);
     }
+
     .kpi-card:hover {
         transform: translateY(-3px);
         border-color: rgba(56, 189, 248, 0.3);
     }
+
     .table-custom {
         background: transparent !important;
     }
+
     .table-custom th {
         border-bottom: 2px solid rgba(255, 255, 255, 0.1) !important;
         color: var(--text-secondary) !important;
@@ -44,22 +50,26 @@
         font-size: 0.75rem;
         letter-spacing: 0.5px;
     }
+
     .table-custom td {
         border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
         color: var(--text-primary) !important;
         vertical-align: middle;
     }
+
     .progress-bar-custom {
         height: 6px;
         background: rgba(255, 255, 255, 0.05);
         border-radius: 3px;
         overflow: hidden;
     }
+
     .progress-fill {
         height: 100%;
         background: var(--primary-glow);
         border-radius: 3px;
     }
+
     .reset-btn {
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -67,6 +77,7 @@
         transition: var(--transition-smooth);
         border-radius: 10px;
     }
+
     .reset-btn:hover {
         background: rgba(255, 255, 255, 0.1);
         color: var(--text-primary);
@@ -77,17 +88,18 @@
 {% block content %}
 <div class="container py-4">
     <!-- Header -->
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
+    <div
+        class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-3 border-bottom border-secondary border-opacity-25">
         <div>
             <span class="text-info fw-bold text-uppercase tracking-wider text-xs">Oracle Cloud Cost Optimization</span>
             <h1 class="fw-bold mt-1 mb-0">Cost Executive Dashboard</h1>
         </div>
         <div class="mt-3 mt-md-0 d-flex align-items-center">
             <div class="me-3 text-end">
-                <span class="text-secondary d-block text-sm">FinOps Platform</span>
                 <span class="fw-bold text-white">Welcome, {{ user.username }}</span>
             </div>
-            <div class="rounded-circle border border-info overflow-hidden d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; background: rgba(56, 189, 248, 0.1);">
+            <div class="rounded-circle border border-info overflow-hidden d-flex align-items-center justify-content-center"
+                style="width: 50px; height: 50px; background: rgba(56, 189, 248, 0.1);">
                 <i class="fa-solid fa-user-astronaut text-info fs-4"></i>
             </div>
         </div>
@@ -117,7 +129,8 @@
     <!-- Active Dashboard State -->
 
     {% if date_warning %}
-    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert" style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
+    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert"
+        style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
         <div class="d-flex align-items-center">
             <i class="fa-solid fa-triangle-exclamation me-2 fs-5"></i>
             <div>{{ date_warning }}</div>
@@ -127,10 +140,12 @@
     {% endif %}
 
     {% if has_multiple_currencies %}
-    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert" style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
+    <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm mb-4" role="alert"
+        style="background: rgba(245, 158, 11, 0.15); border-left: 4px solid #f59e0b !important; color: #fbbf24;">
         <div class="d-flex align-items-center">
             <i class="fa-solid fa-triangle-exclamation me-2 fs-5"></i>
-            <div>Multiple currencies detected. Combined monetary totals may not represent a directly comparable value.</div>
+            <div>Multiple currencies detected. Combined monetary totals may not represent a directly comparable value.
+            </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
@@ -142,11 +157,13 @@
         <form method="GET" action="{% url 'dashboard-home' %}" class="row g-3">
             <div class="col-md-3">
                 <label class="form-label text-secondary text-sm">Start Date</label>
-                <input type="date" name="start_date" class="form-control filter-input" value="{{ active_filters.start_date }}">
+                <input type="date" name="start_date" class="form-control filter-input"
+                    value="{{ active_filters.start_date }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label text-secondary text-sm">End Date</label>
-                <input type="date" name="end_date" class="form-control filter-input" value="{{ active_filters.end_date }}">
+                <input type="date" name="end_date" class="form-control filter-input"
+                    value="{{ active_filters.end_date }}">
             </div>
             <div class="col-md-2">
                 <label class="form-label text-secondary text-sm">Service</label>
@@ -222,520 +239,569 @@
                     <i class="fa-solid fa-file-csv me-2 text-info"></i>
                     <span>Manage uploads in the billing section</span>
                 </div>
+            </div>
+        </div>
     </div>
-    
+
     <!-- Forecast KPI Section -->
-    {% if forecast_available %}
-    <div class="row g-4 mb-4">
-        {% for summary in forecast_summaries %}
-        <div class="col-md-6">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(99, 102, 241, 0.25);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Next Month Forecast ({{ summary.currency }})</span>
-                        <h2 class="fw-extrabold text-info m-0">
-                            {{ summary.next_month_forecast|floatformat:2 }} <span class="fs-6 text-white fw-normal">{{ summary.currency }}</span>
-                        </h2>
-                    </div>
-                    <div class="text-end">
-                        <span class="text-secondary text-xs d-block mb-1">Confidence</span>
-                        <span class="badge {% if summary.confidence == 'HIGH' %}bg-success{% elif summary.confidence == 'MEDIUM' %}bg-info{% else %}bg-warning{% endif %}">
-                            {{ summary.confidence }}
-                        </span>
+            {% if forecast_available %}
+            <div class="row g-4 mb-4">
+                {% for summary in forecast_summaries %}
+                <div class="col-md-6">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(99, 102, 241, 0.25);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Next Month Forecast ({{
+                                    summary.currency }})</span>
+                                <h2 class="fw-extrabold text-info m-0">
+                                    {{ summary.next_month_forecast|floatformat:2 }} <span
+                                        class="fs-6 text-white fw-normal">{{ summary.currency }}</span>
+                                </h2>
+                            </div>
+                            <div class="text-end">
+                                <span class="text-secondary text-xs d-block mb-1">Confidence</span>
+                                <span
+                                    class="badge {% if summary.confidence == 'HIGH' %}bg-success{% elif summary.confidence == 'MEDIUM' %}bg-info{% else %}bg-warning{% endif %}">
+                                    {{ summary.confidence }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <span class="text-secondary text-xs">Deterministic linear spending trend</span>
+                            <a href="{% url 'cost-forecast' %}"
+                                class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
+                                <i class="fa-solid fa-chart-line me-1"></i>View Forecast Details
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="mt-3 d-flex justify-content-between align-items-center">
-                    <span class="text-secondary text-xs">Deterministic linear spending trend</span>
-                    <a href="{% url 'cost-forecast' %}" class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
-                        <i class="fa-solid fa-chart-line me-1"></i>View Forecast Details
-                    </a>
-                </div>
+                {% endfor %}
             </div>
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
+            {% endif %}
 
-    <!-- Anomalies KPI Section -->
-    <div class="row g-4 mb-4">
-        <!-- Card: Open Anomalies -->
-        <div class="col-md-6">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(245, 158, 11, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Open Cost Anomalies</span>
-                        <h2 class="fw-extrabold text-warning m-0">
-                            {{ open_anomalies_count }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(245, 158, 11, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+            <!-- Anomalies KPI Section -->
+            <div class="row g-4 mb-4">
+                <!-- Card: Open Anomalies -->
+                <div class="col-md-6">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(245, 158, 11, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Open Cost Anomalies</span>
+                                <h2 class="fw-extrabold text-warning m-0">
+                                    {{ open_anomalies_count }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(245, 158, 11, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <span class="text-secondary text-xs">Unresolved spending warnings</span>
+                            <a href="{% url 'anomaly-list' %}"
+                                class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
+                                <i class="fa-solid fa-eye me-1"></i>View Cost Anomalies
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="mt-3 d-flex justify-content-between align-items-center">
-                    <span class="text-secondary text-xs">Unresolved spending warnings</span>
-                    <a href="{% url 'anomaly-list' %}" class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
-                        <i class="fa-solid fa-eye me-1"></i>View Cost Anomalies
-                    </a>
+                <!-- Card: Critical Anomalies -->
+                <div class="col-md-6">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(239, 68, 68, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Critical Anomalies</span>
+                                <h2 class="fw-extrabold text-danger m-0">
+                                    {{ critical_anomalies_count }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(239, 68, 68, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-radiation text-danger fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                            <i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>
+                            <span>Requires immediate FinOps review</span>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <!-- Card: Critical Anomalies -->
-        <div class="col-md-6">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(239, 68, 68, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Critical Anomalies</span>
-                        <h2 class="fw-extrabold text-danger m-0">
-                            {{ critical_anomalies_count }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(239, 68, 68, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-radiation text-danger fs-5"></i>
-                    </div>
-                </div>
-                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
-                    <i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>
-                    <span>Requires immediate FinOps review</span>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Waste Findings KPI Section -->
-    <div class="row g-4 mb-4">
-        <!-- Card: Open Waste Findings -->
-        <div class="col-md-6">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(56, 189, 248, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Open Waste Findings</span>
-                        <h2 class="fw-extrabold text-info m-0">
-                            {{ open_waste_count }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(56, 189, 248, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-trash-can text-info fs-5"></i>
+            <!-- Waste Findings KPI Section -->
+            <div class="row g-4 mb-4">
+                <!-- Card: Open Waste Findings -->
+                <div class="col-md-6">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(56, 189, 248, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Open Waste Findings</span>
+                                <h2 class="fw-extrabold text-info m-0">
+                                    {{ open_waste_count }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(56, 189, 248, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-trash-can text-info fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <span class="text-secondary text-xs">Potential optimization candidates</span>
+                            <a href="{% url 'waste-list' %}"
+                                class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
+                                <i class="fa-solid fa-eye me-1"></i>View Waste Findings
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="mt-3 d-flex justify-content-between align-items-center">
-                    <span class="text-secondary text-xs">Potential optimization candidates</span>
-                    <a href="{% url 'waste-list' %}" class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
-                        <i class="fa-solid fa-eye me-1"></i>View Waste Findings
-                    </a>
+                <!-- Card: Estimated Potential Monthly Savings -->
+                <div class="col-md-6">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(34, 197, 94, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Estimated Potential Monthly
+                                    Savings</span>
+                                <h2 class="fw-extrabold text-success m-0">
+                                    {{ potential_waste_savings }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(34, 197, 94, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-piggy-bank text-success fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                            <i class="fa-solid fa-circle-info me-2 text-success"></i>
+                            {% if waste_has_multiple_currencies %}
+                            <span class="text-warning">Currencies separated to avoid mismatch</span>
+                            {% else %}
+                            <span>Conservative billing savings estimation</span>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <!-- Card: Estimated Potential Monthly Savings -->
-        <div class="col-md-6">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(34, 197, 94, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Estimated Potential Monthly Savings</span>
-                        <h2 class="fw-extrabold text-success m-0">
-                            {{ potential_waste_savings }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(34, 197, 94, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-piggy-bank text-success fs-5"></i>
-                    </div>
-                </div>
-                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
-                    <i class="fa-solid fa-circle-info me-2 text-success"></i>
-                    {% if waste_has_multiple_currencies %}
-                        <span class="text-warning">Currencies separated to avoid mismatch</span>
-                    {% else %}
-                        <span>Conservative billing savings estimation</span>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Recommendations KPI Section -->
-    <div class="row g-4 mb-4">
-        <!-- Card: Open Recommendations -->
-        <div class="col-md-4">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(167, 139, 250, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Open Recommendations</span>
-                        <h2 class="fw-extrabold m-0" style="color: #a78bfa !important;">
-                            {{ open_recommendations_count }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(167, 139, 250, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-lightbulb fs-5" style="color: #a78bfa !important;"></i>
+            <!-- Recommendations KPI Section -->
+            <div class="row g-4 mb-4">
+                <!-- Card: Open Recommendations -->
+                <div class="col-md-4">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(167, 139, 250, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Open Recommendations</span>
+                                <h2 class="fw-extrabold m-0" style="color: #a78bfa !important;">
+                                    {{ open_recommendations_count }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(167, 139, 250, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-lightbulb fs-5" style="color: #a78bfa !important;"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <span class="text-secondary text-xs">Actionable optimization tips</span>
+                            <a href="{% url 'recommendation-list' %}"
+                                class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
+                                <i class="fa-solid fa-eye me-1"></i>View Recommendations
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="mt-3 d-flex justify-content-between align-items-center">
-                    <span class="text-secondary text-xs">Actionable optimization tips</span>
-                    <a href="{% url 'recommendation-list' %}" class="btn btn-secondary-custom btn-sm py-1 px-2.5 text-xs text-info">
-                        <i class="fa-solid fa-eye me-1"></i>View Recommendations
-                    </a>
+                <!-- Card: High Priority Recommendations -->
+                <div class="col-md-4">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(239, 68, 68, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">High/Critical Priority</span>
+                                <h2 class="fw-extrabold text-danger m-0">
+                                    {{ high_priority_recommendations_count }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(239, 68, 68, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-circle-exclamation text-danger fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                            <i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>
+                            <span>Requires immediate FinOps action</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Card: Estimated Potential Savings -->
+                <div class="col-md-4">
+                    <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between"
+                        style="border-color: rgba(34, 197, 94, 0.2);">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="text-secondary text-sm d-block mb-1">Potential Recommendation
+                                    Savings</span>
+                                <h2 class="fw-extrabold text-success m-0">
+                                    {{ potential_recommendation_savings }}
+                                </h2>
+                            </div>
+                            <div class="rounded-circle p-2.5"
+                                style="background: rgba(34, 197, 94, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa-solid fa-piggy-bank text-success fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-secondary text-xs d-flex align-items-center">
+                            <i class="fa-solid fa-circle-info me-2 text-success"></i>
+                            <span>Deduplicated waste savings included</span>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <!-- Card: High Priority Recommendations -->
-        <div class="col-md-4">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(239, 68, 68, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">High/Critical Priority</span>
-                        <h2 class="fw-extrabold text-danger m-0">
-                            {{ high_priority_recommendations_count }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(239, 68, 68, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-circle-exclamation text-danger fs-5"></i>
-                    </div>
-                </div>
-                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
-                    <i class="fa-solid fa-circle-exclamation me-2 text-danger"></i>
-                    <span>Requires immediate FinOps action</span>
-                </div>
-            </div>
-        </div>
-        <!-- Card: Estimated Potential Savings -->
-        <div class="col-md-4">
-            <div class="kpi-card shadow-sm h-100 d-flex flex-column justify-content-between" style="border-color: rgba(34, 197, 94, 0.2);">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <span class="text-secondary text-sm d-block mb-1">Potential Recommendation Savings</span>
-                        <h2 class="fw-extrabold text-success m-0">
-                            {{ potential_recommendation_savings }}
-                        </h2>
-                    </div>
-                    <div class="rounded-circle p-2.5" style="background: rgba(34, 197, 94, 0.1); width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;">
-                        <i class="fa-solid fa-piggy-bank text-success fs-5"></i>
-                    </div>
-                </div>
-                <div class="mt-3 text-secondary text-xs d-flex align-items-center">
-                    <i class="fa-solid fa-circle-info me-2 text-success"></i>
-                    <span>Deduplicated waste savings included</span>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- What-if Cost Simulator Section -->
-    {% if has_simulator %}
-    <div class="row g-4 mb-4">
-        <div class="col-12">
-            <div class="kpi-card shadow-sm d-flex flex-column flex-md-row justify-content-between align-items-md-center" style="border-color: rgba(56, 189, 248, 0.25); background: linear-gradient(135deg, rgba(56, 189, 248, 0.02) 0%, rgba(56, 189, 248, 0.08) 100%);">
-                <div class="mb-3 mb-md-0">
-                    <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-sliders text-info me-2"></i>What-if Cost Simulator</h5>
-                    <p class="text-secondary text-sm m-0">Simulate hypothetical cloud spend changes and model cost optimization scenarios deterministically.</p>
-                </div>
-                <div>
-                    <a href="{% url 'cost-simulator' %}" class="btn btn-primary-glow px-4 py-2">
-                        <i class="fa-solid fa-play me-2"></i>Run Cost Simulation
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
 
-    <!-- Executive Reports Section -->
-    {% if has_reports %}
-    <div class="row g-4 mb-4">
-        <div class="col-12">
-            <div class="kpi-card shadow-sm d-flex flex-column flex-md-row justify-content-between align-items-md-center" style="border-color: rgba(99, 102, 241, 0.25); background: linear-gradient(135deg, rgba(99, 102, 241, 0.02) 0%, rgba(99, 102, 241, 0.08) 100%);">
-                <div class="mb-3 mb-md-0">
-                    <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-file-pdf text-indigo me-2" style="color: #818cf8;"></i>Executive PDF Reports</h5>
-                    <p class="text-secondary text-sm m-0">Generate a management-ready PDF cost and optimization report using your OCI data.</p>
-                </div>
-                <div>
-                    <a href="{% url 'cost-report' %}" class="btn btn-primary-glow px-4 py-2" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); border-color: #6366f1;">
-                        <i class="fa-solid fa-file-export me-2"></i>Generate Report
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Monthly Trend Section -->
-    <div class="card glass-card p-4 mb-4">
-        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-line text-info me-2"></i>Monthly Spend Trend</h5>
-        <div style="position: relative; height: 320px; width: 100%;">
-            <canvas id="monthlyTrendChart"></canvas>
-        </div>
-    </div>
-
-    <!-- Doughnut Cost Breakdown & Top Regions Section -->
-    <div class="row g-4 mb-4">
-        <!-- Service Breakdown Chart -->
-        <div class="col-md-6">
-            <div class="card glass-card p-4 h-100">
-                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-pie text-info me-2"></i>Service Cost Breakdown</h5>
-                <div class="d-flex align-items-center justify-content-center" style="position: relative; height: 260px; width: 100%;">
-                    <canvas id="serviceBreakdownChart"></canvas>
+            <!-- What-if Cost Simulator Section -->
+            {% if has_simulator %}
+            <div class="row g-4 mb-4">
+                <div class="col-12">
+                    <div class="kpi-card shadow-sm d-flex flex-column flex-md-row justify-content-between align-items-md-center"
+                        style="border-color: rgba(56, 189, 248, 0.25); background: linear-gradient(135deg, rgba(56, 189, 248, 0.02) 0%, rgba(56, 189, 248, 0.08) 100%);">
+                        <div class="mb-3 mb-md-0">
+                            <h5 class="fw-bold text-white mb-1"><i
+                                    class="fa-solid fa-sliders text-info me-2"></i>What-if Cost Simulator</h5>
+                            <p class="text-secondary text-sm m-0">Simulate hypothetical cloud spend changes and model
+                                cost optimization scenarios deterministically.</p>
+                        </div>
+                        <div>
+                            <a href="{% url 'cost-simulator' %}" class="btn btn-primary-glow px-4 py-2">
+                                <i class="fa-solid fa-play me-2"></i>Run Cost Simulation
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <!-- Top Regions Table -->
-        <div class="col-md-6">
-            <div class="card glass-card p-4 h-100">
-                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-earth-americas text-info me-2"></i>Top Regions</h5>
+            {% endif %}
+
+            <!-- Executive Reports Section -->
+            {% if has_reports %}
+            <div class="row g-4 mb-4">
+                <div class="col-12">
+                    <div class="kpi-card shadow-sm d-flex flex-column flex-md-row justify-content-between align-items-md-center"
+                        style="border-color: rgba(99, 102, 241, 0.25); background: linear-gradient(135deg, rgba(99, 102, 241, 0.02) 0%, rgba(99, 102, 241, 0.08) 100%);">
+                        <div class="mb-3 mb-md-0">
+                            <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-file-pdf text-indigo me-2"
+                                    style="color: #818cf8;"></i>Executive PDF Reports</h5>
+                            <p class="text-secondary text-sm m-0">Generate a management-ready PDF cost and optimization
+                                report using your OCI data.</p>
+                        </div>
+                        <div>
+                            <a href="{% url 'cost-report' %}" class="btn btn-primary-glow px-4 py-2"
+                                style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); border-color: #6366f1;">
+                                <i class="fa-solid fa-file-export me-2"></i>Generate Report
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Monthly Trend Section -->
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-line text-info me-2"></i>Monthly Spend
+                    Trend</h5>
+                <div style="position: relative; height: 320px; width: 100%;">
+                    <canvas id="monthlyTrendChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Doughnut Cost Breakdown & Top Regions Section -->
+            <div class="row g-4 mb-4">
+                <!-- Service Breakdown Chart -->
+                <div class="col-md-6">
+                    <div class="card glass-card p-4 h-100">
+                        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-chart-pie text-info me-2"></i>Service
+                            Cost Breakdown</h5>
+                        <div class="d-flex align-items-center justify-content-center"
+                            style="position: relative; height: 260px; width: 100%;">
+                            <canvas id="serviceBreakdownChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <!-- Top Regions Table -->
+                <div class="col-md-6">
+                    <div class="card glass-card p-4 h-100">
+                        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-earth-americas text-info me-2"></i>Top
+                            Regions</h5>
+                        <div class="table-responsive">
+                            <table class="table table-borderless table-custom m-0">
+                                <thead>
+                                    <tr>
+                                        <th>Region</th>
+                                        <th class="text-end">Cost ({{ currency }})</th>
+                                        <th class="text-end">Percentage</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in top_regions %}
+                                    <tr>
+                                        <td><i class="fa-solid fa-location-dot text-info me-2 text-xs"></i>{{
+                                            item.region }}</td>
+                                        <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                                        <td class="text-end text-secondary">
+                                            <div class="d-flex align-items-center justify-content-end gap-2">
+                                                <span>{{ item.percentage }}%</span>
+                                                <div class="progress-bar-custom d-none d-sm-block" style="width: 60px;">
+                                                    <div class="progress-fill" style="width: {{ item.percentage }}%;">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="3" class="text-center text-secondary py-4">No regional data
+                                            matching filters</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top 5 Expensive Resources Section -->
+            <div class="card glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-receipt text-info me-2"></i>Top 5 Expensive
+                    Resources</h5>
                 <div class="table-responsive">
                     <table class="table table-borderless table-custom m-0">
                         <thead>
                             <tr>
+                                <th>Resource</th>
+                                <th>Resource ID</th>
+                                <th>Service</th>
                                 <th>Region</th>
-                                <th class="text-end">Cost ({{ currency }})</th>
-                                <th class="text-end">Percentage</th>
+                                <th class="text-end">Total Cost ({{ currency }})</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for item in top_regions %}
+                            {% for item in top_resources %}
                             <tr>
-                                <td><i class="fa-solid fa-location-dot text-info me-2 text-xs"></i>{{ item.region }}</td>
-                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
-                                <td class="text-end text-secondary">
-                                    <div class="d-flex align-items-center justify-content-end gap-2">
-                                        <span>{{ item.percentage }}%</span>
-                                        <div class="progress-bar-custom d-none d-sm-block" style="width: 60px;">
-                                            <div class="progress-fill" style="width: {{ item.percentage }}%;"></div>
-                                        </div>
-                                    </div>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr>
-                                <td colspan="3" class="text-center text-secondary py-4">No regional data matching filters</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Top 5 Expensive Resources Section -->
-    <div class="card glass-card p-4 mb-4">
-        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-receipt text-info me-2"></i>Top 5 Expensive Resources</h5>
-        <div class="table-responsive">
-            <table class="table table-borderless table-custom m-0">
-                <thead>
-                    <tr>
-                        <th>Resource</th>
-                        <th>Resource ID</th>
-                        <th>Service</th>
-                        <th>Region</th>
-                        <th class="text-end">Total Cost ({{ currency }})</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in top_resources %}
-                    <tr>
-                        <td class="fw-semibold text-white"><i class="fa-solid fa-cube text-info me-2 text-xs"></i>{{ item.display_name }}</td>
-                        <td><code class="text-secondary text-xs">{{ item.resource_id }}</code></td>
-                        <td><span class="badge bg-secondary bg-opacity-20 text-info border border-secondary border-opacity-35">{{ item.service }}</span></td>
-                        <td>{{ item.region }}</td>
-                        <td class="text-end fw-bold text-white">{{ item.total|floatformat:2 }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="5" class="text-center text-secondary py-4">No resource billing records matching filters</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Breakdown Details Grid -->
-    <div class="row g-4 mb-4">
-        <!-- Service Full Spending -->
-        <div class="col-md-6">
-            <div class="card glass-card p-4">
-                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-server text-info me-2"></i>Service Spending Breakdown</h5>
-                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                    <table class="table table-borderless table-custom m-0">
-                        <thead>
-                            <tr>
-                                <th>Service Name</th>
-                                <th class="text-end">Spent ({{ currency }})</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in service_costs %}
-                            <tr>
-                                <td>{{ item.service }}</td>
-                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr>
-                                <td colspan="2" class="text-center text-secondary py-3">No service data available</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        <!-- Region Full Spending -->
-        <div class="col-md-6">
-            <div class="card glass-card p-4">
-                <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-earth-americas text-info me-2"></i>Region Spending Breakdown</h5>
-                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                    <table class="table table-borderless table-custom m-0">
-                        <thead>
-                            <tr>
-                                <th>Region</th>
-                                <th class="text-end">Spent ({{ currency }})</th>
-                                <th class="text-end">Share</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in full_regions %}
-                            <tr>
+                                <td class="fw-semibold text-white"><i
+                                        class="fa-solid fa-cube text-info me-2 text-xs"></i>{{ item.display_name }}</td>
+                                <td><code class="text-secondary text-xs">{{ item.resource_id }}</code></td>
+                                <td><span
+                                        class="badge bg-secondary bg-opacity-20 text-info border border-secondary border-opacity-35">{{
+                                        item.service }}</span></td>
                                 <td>{{ item.region }}</td>
-                                <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
-                                <td class="text-end text-secondary">{{ item.percentage }}%</td>
+                                <td class="text-end fw-bold text-white">{{ item.total|floatformat:2 }}</td>
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="3" class="text-center text-secondary py-3">No region data available</td>
+                                <td colspan="5" class="text-center text-secondary py-4">No resource billing records
+                                    matching filters</td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
             </div>
+
+            <!-- Breakdown Details Grid -->
+            <div class="row g-4 mb-4">
+                <!-- Service Full Spending -->
+                <div class="col-md-6">
+                    <div class="card glass-card p-4">
+                        <h5 class="fw-bold mb-3 text-white"><i class="fa-solid fa-server text-info me-2"></i>Service
+                            Spending Breakdown</h5>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-borderless table-custom m-0">
+                                <thead>
+                                    <tr>
+                                        <th>Service Name</th>
+                                        <th class="text-end">Spent ({{ currency }})</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in service_costs %}
+                                    <tr>
+                                        <td>{{ item.service }}</td>
+                                        <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="2" class="text-center text-secondary py-3">No service data
+                                            available</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <!-- Region Full Spending -->
+                <div class="col-md-6">
+                    <div class="card glass-card p-4">
+                        <h5 class="fw-bold mb-3 text-white"><i
+                                class="fa-solid fa-earth-americas text-info me-2"></i>Region Spending Breakdown</h5>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-borderless table-custom m-0">
+                                <thead>
+                                    <tr>
+                                        <th>Region</th>
+                                        <th class="text-end">Spent ({{ currency }})</th>
+                                        <th class="text-end">Share</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in full_regions %}
+                                    <tr>
+                                        <td>{{ item.region }}</td>
+                                        <td class="text-end fw-semibold text-white">{{ item.total|floatformat:2 }}</td>
+                                        <td class="text-end text-secondary">{{ item.percentage }}%</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="3" class="text-center text-secondary py-3">No region data available
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
-    </div>
-    {% endif %}
-</div>
-{% endblock %}
+        {% endblock %}
 
-{% block extra_js %}
-{% if has_any_data %}
-<!-- Chart.js Library -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        {% block extra_js %}
+        {% if has_any_data %}
+        <!-- Chart.js Library -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<!-- Safely serialize backend lists using standard Django json_script tags -->
-{{ monthly_labels|json_script:"monthly-labels-data" }}
-{{ monthly_data|json_script:"monthly-trend-data" }}
-{{ service_labels|json_script:"service-labels-data" }}
-{{ service_data|json_script:"service-breakdown-data" }}
+        <!-- Safely serialize backend lists using standard Django json_script tags -->
+        {{ monthly_labels|json_script:"monthly-labels-data" }}
+        {{ monthly_data|json_script:"monthly-trend-data" }}
+        {{ service_labels|json_script:"service-labels-data" }}
+        {{ service_data|json_script:"service-breakdown-data" }}
 
-<script>
-    document.addEventListener("DOMContentLoaded", function() {
-        // Retrieve and parse securely serialized data from JSON nodes
-        const monthlyLabels = JSON.parse(document.getElementById('monthly-labels-data').textContent);
-        const monthlyData = JSON.parse(document.getElementById('monthly-trend-data').textContent);
-        const serviceLabels = JSON.parse(document.getElementById('service-labels-data').textContent);
-        const serviceData = JSON.parse(document.getElementById('service-breakdown-data').textContent);
+        <script>
+            document.addEventListener("DOMContentLoaded", function () {
+                // Retrieve and parse securely serialized data from JSON nodes
+                const monthlyLabels = JSON.parse(document.getElementById('monthly-labels-data').textContent);
+                const monthlyData = JSON.parse(document.getElementById('monthly-trend-data').textContent);
+                const serviceLabels = JSON.parse(document.getElementById('service-labels-data').textContent);
+                const serviceData = JSON.parse(document.getElementById('service-breakdown-data').textContent);
 
-        // Chart styling configuration defaults
-        Chart.defaults.color = 'rgba(255, 255, 255, 0.6)';
-        Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.08)';
+                // Chart styling configuration defaults
+                Chart.defaults.color = 'rgba(255, 255, 255, 0.6)';
+                Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.08)';
 
-        // 1. Line Chart: Monthly Spend Trend
-        const ctxMonthly = document.getElementById('monthlyTrendChart');
-        if (ctxMonthly) {
-            new Chart(ctxMonthly, {
-                type: 'line',
-                data: {
-                    labels: monthlyLabels,
-                    datasets: [{
-                        label: 'Monthly Cost ({{ currency }})',
-                        data: monthlyData,
-                        borderColor: '#6366f1',
-                        backgroundColor: 'rgba(99, 102, 241, 0.15)',
-                        borderWidth: 3,
-                        fill: true,
-                        tension: 0.35,
-                        pointBackgroundColor: '#38bdf8',
-                        pointBorderColor: '#ffffff',
-                        pointRadius: 5,
-                        pointHoverRadius: 7
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
+                // 1. Line Chart: Monthly Spend Trend
+                const ctxMonthly = document.getElementById('monthlyTrendChart');
+                if (ctxMonthly) {
+                    new Chart(ctxMonthly, {
+                        type: 'line',
+                        data: {
+                            labels: monthlyLabels,
+                            datasets: [{
+                                label: 'Monthly Cost ({{ currency }})',
+                                data: monthlyData,
+                                borderColor: '#6366f1',
+                                backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                                borderWidth: 3,
+                                fill: true,
+                                tension: 0.35,
+                                pointBackgroundColor: '#38bdf8',
+                                pointBorderColor: '#ffffff',
+                                pointRadius: 5,
+                                pointHoverRadius: 7
+                            }]
                         },
-                        tooltip: {
-                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                            titleColor: '#ffffff',
-                            bodyColor: '#38bdf8',
-                            borderColor: 'rgba(255, 255, 255, 0.1)',
-                            borderWidth: 1,
-                            padding: 10,
-                            displayColors: false
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.05)'
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                                    titleColor: '#ffffff',
+                                    bodyColor: '#38bdf8',
+                                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                                    borderWidth: 1,
+                                    padding: 10,
+                                    displayColors: false
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    grid: {
+                                        color: 'rgba(255, 255, 255, 0.05)'
+                                    }
+                                },
+                                x: {
+                                    grid: {
+                                        display: false
+                                    }
+                                }
                             }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
                         }
-                    }
+                    });
                 }
-            });
-        }
 
-        // 2. Doughnut Chart: Service Cost Breakdown
-        const ctxService = document.getElementById('serviceBreakdownChart');
-        if (ctxService) {
-            new Chart(ctxService, {
-                type: 'doughnut',
-                data: {
-                    labels: serviceLabels,
-                    datasets: [{
-                        data: serviceData,
-                        backgroundColor: [
-                            '#6366f1', # Indigo
+                // 2. Doughnut Chart: Service Cost Breakdown
+                const ctxService = document.getElementById('serviceBreakdownChart');
+                if (ctxService) {
+                    new Chart(ctxService, {
+                        type: 'doughnut',
+                        data: {
+                            labels: serviceLabels,
+                            datasets: [{
+                                data: serviceData,
+                                backgroundColor: [
+                                    '#6366f1', # Indigo
                             '#38bdf8', # Sky Blue
                             '#a855f7', # Purple
                             '#f43f5e', # Rose Red
                             '#10b981', # Emerald Green
                             '#fbbf24'  # Amber Yellow
-                        ],
-                        borderWidth: 1,
-                        borderColor: 'rgba(17, 24, 39, 0.8)'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                boxWidth: 15,
-                                padding: 15
-                            }
+                                ],
+                                borderWidth: 1,
+                                borderColor: 'rgba(17, 24, 39, 0.8)'
+                            }]
                         },
-                        tooltip: {
-                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                            titleColor: '#ffffff',
-                            bodyColor: '#38bdf8',
-                            borderColor: 'rgba(255, 255, 255, 0.1)',
-                            borderWidth: 1,
-                            padding: 10
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'right',
+                                    labels: {
+                                        boxWidth: 15,
+                                        padding: 15
+                                    }
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                                    titleColor: '#ffffff',
+                                    bodyColor: '#38bdf8',
+                                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                                    borderWidth: 1,
+                                    padding: 10
+                                }
+                            },
+                            cutout: '65%'
                         }
-                    },
-                    cutout: '65%'
+                    });
                 }
             });
-        }
-    });
-</script>
-{% endif %}
-{% endblock %}
+        </script>
+        {% endif %}
+        {% endblock %}

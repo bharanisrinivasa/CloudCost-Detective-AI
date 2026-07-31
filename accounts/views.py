@@ -272,60 +272,52 @@ def update_member_role_view(request, membership_id):
     if not active_project:
         return redirect("accounts:project-list")
         
-    if not has_project_permission(request.user, active_project, "MANAGE_MEMBERS"):
-        raise PermissionDenied("You do not have permission to manage members.")
-        
-    membership = get_object_or_404(OrganizationMembership, pk=membership_id, organization=active_project.organization)
-    
-    # Prevent editing own membership or demoting/promoting to OWNER if not owner
-    my_membership = OrganizationMembership.objects.filter(
-        user=request.user,
-        organization=active_project.organization
-    ).first()
-    
-    if not my_membership:
-        raise PermissionDenied("You do not belong to this organization.")
-        
-    if membership.user == request.user:
-        new_role = request.POST.get("role", "").upper()
-        if membership.role == "OWNER" and new_role != "OWNER":
-            from django.db import transaction
-            with transaction.atomic():
-                owners_count = OrganizationMembership.objects.select_for_update().filter(
-                    organization=active_project.organization,
-                    role="OWNER"
-                ).count()
-                if owners_count <= 1:
-                    raise PermissionDenied("Cannot demote the final Owner. The organization must have at least one Owner.")
-        raise PermissionDenied("You cannot modify your own role.")
-        
-    if membership.role == "OWNER" and my_membership.role != "OWNER":
-        raise PermissionDenied("Only Owners can modify other Owners' roles.")
-        
     new_role = request.POST.get("role", "").upper()
     if new_role not in ["OWNER", "ADMIN", "ANALYST", "VIEWER"]:
         raise PermissionDenied("Invalid role selection.")
         
-    if new_role == "OWNER" and my_membership.role != "OWNER":
-        raise PermissionDenied("Only Owners can designate other Owners.")
+    from django.db import transaction
+    with transaction.atomic():
+        memberships_qs = OrganizationMembership.objects.select_for_update().filter(
+            organization=active_project.organization
+        )
         
-    if my_membership.role == "ADMIN" and new_role == "OWNER":
-        raise PermissionDenied("Admins cannot assign a role above Admin.")
+        membership = get_object_or_404(memberships_qs, pk=membership_id)
+        my_membership = memberships_qs.filter(user=request.user).first()
         
-    # Final OWNER protection from demotion
-    if membership.role == "OWNER" and new_role != "OWNER":
-        from django.db import transaction
-        with transaction.atomic():
-            owners_count = OrganizationMembership.objects.select_for_update().filter(
-                organization=active_project.organization,
-                role="OWNER"
-            ).count()
+        if not my_membership:
+            raise PermissionDenied("You do not belong to this organization.")
+            
+        if not has_project_permission(request.user, active_project, "MANAGE_MEMBERS"):
+            raise PermissionDenied("You do not have permission to manage members.")
+            
+        if membership.user == request.user:
+            if membership.role == "OWNER" and new_role != "OWNER":
+                owners_count = memberships_qs.filter(role="OWNER").count()
+                if owners_count <= 1:
+                    raise PermissionDenied("Cannot demote the final Owner. The organization must have at least one Owner.")
+            raise PermissionDenied("You cannot modify your own role.")
+            
+        if membership.role == "OWNER" and my_membership.role != "OWNER":
+            raise PermissionDenied("Only Owners can modify other Owners' roles.")
+            
+        if new_role == "OWNER" and my_membership.role != "OWNER":
+            raise PermissionDenied("Only Owners can designate other Owners.")
+            
+        if my_membership.role == "ADMIN" and new_role == "OWNER":
+            raise PermissionDenied("Admins cannot assign a role above Admin.")
+            
+        # Final OWNER protection from demotion
+        if membership.role == "OWNER" and new_role != "OWNER":
+            owners_count = memberships_qs.filter(role="OWNER").count()
             if owners_count <= 1:
                 raise PermissionDenied("Cannot demote the final Owner. The organization must have at least one Owner.")
 
-    membership.role = new_role
-    membership.save()
-    messages.success(request, f"Updated role for '{membership.user.username}' to {new_role}.")
+        membership.role = new_role
+        membership.save()
+        username = membership.user.username
+
+    messages.success(request, f"Updated role for '{username}' to {new_role}.")
     return redirect("accounts:org-members")
 
 
@@ -337,51 +329,47 @@ def remove_member_view(request, membership_id):
     if not active_project:
         return redirect("accounts:project-list")
         
-    if not has_project_permission(request.user, active_project, "MANAGE_MEMBERS"):
-        raise PermissionDenied("You do not have permission to manage members.")
+    from django.db import transaction
+    with transaction.atomic():
+        memberships_qs = OrganizationMembership.objects.select_for_update().filter(
+            organization=active_project.organization
+        )
         
-    membership = get_object_or_404(OrganizationMembership, pk=membership_id, organization=active_project.organization)
-    
-    my_membership = OrganizationMembership.objects.filter(
-        user=request.user,
-        organization=active_project.organization
-    ).first()
-    
-    if not my_membership:
-        raise PermissionDenied("You do not belong to this organization.")
+        membership = get_object_or_404(memberships_qs, pk=membership_id)
+        my_membership = memberships_qs.filter(user=request.user).first()
         
-    if membership.role == "OWNER" and my_membership.role != "OWNER":
-        raise PermissionDenied("Only Owners can remove other Owners.")
-        
-    # Self-removal (leaving the organization)
-    if membership.user == request.user:
-        # Protect final OWNER from leaving
-        if membership.role == "OWNER":
-            from django.db import transaction
-            with transaction.atomic():
-                owners_count = OrganizationMembership.objects.select_for_update().filter(
-                    organization=active_project.organization,
-                    role="OWNER"
-                ).count()
+        if not my_membership:
+            raise PermissionDenied("You do not belong to this organization.")
+            
+        if not has_project_permission(request.user, active_project, "MANAGE_MEMBERS"):
+            raise PermissionDenied("You do not have permission to manage members.")
+            
+        if membership.role == "OWNER" and my_membership.role != "OWNER":
+            raise PermissionDenied("Only Owners can remove other Owners.")
+            
+        # Self-removal (leaving the organization)
+        if membership.user == request.user:
+            # Protect final OWNER from leaving
+            if membership.role == "OWNER":
+                owners_count = memberships_qs.filter(role="OWNER").count()
                 if owners_count <= 1:
                     raise PermissionDenied("Cannot leave the organization as the final Owner. You must designate another Owner first.")
-        membership.delete()
+            membership.delete()
+            is_self = True
+        else:
+            # Removing someone else: protect final OWNER from removal
+            if membership.role == "OWNER":
+                owners_count = memberships_qs.filter(role="OWNER").count()
+                if owners_count <= 1:
+                    raise PermissionDenied("Cannot remove the final Owner. The organization must have at least one Owner.")
+            username = membership.user.username
+            membership.delete()
+            is_self = False
+
+    if is_self:
         messages.success(request, "You have left the organization.")
         return redirect("accounts:project-list")
-        
-    # Removing someone else: protect final OWNER from removal
-    if membership.role == "OWNER":
-        from django.db import transaction
-        with transaction.atomic():
-            owners_count = OrganizationMembership.objects.select_for_update().filter(
-                organization=active_project.organization,
-                role="OWNER"
-            ).count()
-            if owners_count <= 1:
-                raise PermissionDenied("Cannot remove the final Owner. The organization must have at least one Owner.")
-                
-    username = membership.user.username
-    membership.delete()
-    messages.success(request, f"Removed member '{username}' from the organization.")
-    return redirect("accounts:org-members")
+    else:
+        messages.success(request, f"Removed member '{username}' from the organization.")
+        return redirect("accounts:org-members")
 

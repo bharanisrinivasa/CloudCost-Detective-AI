@@ -1827,6 +1827,10 @@ class SimulatorTests(TestCase):
 
 class ExecutiveReportTests(TestCase):
     def setUp(self):
+        from unittest.mock import patch
+        self.localdate_patcher = patch('django.utils.timezone.localdate', return_value=datetime.date(2026, 7, 2))
+        self.mock_localdate = self.localdate_patcher.start()
+
         from ai_engine.models import Recommendation
         self.user_a = User.objects.create_user(username="repuser_a", email="ra@example.com", password="password123")
         self.user_b = User.objects.create_user(username="repuser_b", email="rb@example.com", password="password123")
@@ -1987,6 +1991,9 @@ class ExecutiveReportTests(TestCase):
         # Override auto_now_add detected_at dates for period query isolation
         dt = datetime.datetime.combine(self.last_month_date, datetime.time(12, 0), tzinfo=datetime.timezone.utc)
         Recommendation.objects.filter(pk__in=[self.rec1.pk, self.rec2.pk]).update(detected_at=dt)
+
+    def tearDown(self):
+        self.localdate_patcher.stop()
 
     def test_access_requires_login(self):
         url = reverse("cost-report")
